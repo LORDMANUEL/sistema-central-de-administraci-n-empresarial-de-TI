@@ -7,7 +7,7 @@ IT Guardian unifica endpoints, servidores, móviles, impresoras, red, seguridad,
 ## Estado
 
 **Rama activa:** `feature/v0.1.0-foundation`  
-**Versión:** `0.1.0-dev.1`  
+**Versión:** `0.1.0-dev.2`  
 **Primer servicio:** Identity Service
 
 La rama `main` se conserva como línea estable. Los módulos se terminan, prueban y documentan antes de promoverse.
@@ -25,7 +25,8 @@ Incluye el primer corte de Identity Service:
 
 - bootstrap único y transaccional del `platform_admin`;
 - Argon2;
-- JWT access/refresh tipados;
+- JWT Ed25519/EdDSA access/refresh con `kid`, issuer y audience;
+- JWKS público para validación inter-servicio sin compartir clave privada;
 - RBAC inicial;
 - alta/listado/activación de usuarios;
 - errores normalizados con `request_id`;
@@ -39,7 +40,13 @@ Incluye el primer corte de Identity Service:
 ## Arranque Docker
 
 1. Copie `.env.example` a `.env`.
-2. Reemplace `POSTGRES_PASSWORD` e `IDENTITY_JWT_SECRET` con secretos fuertes.
+2. Reemplace `POSTGRES_PASSWORD` y genere una semilla Ed25519 privada de 32 bytes:
+
+```bash
+python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b'=') .decode())"
+```
+
+Guarde el resultado en `IDENTITY_SIGNING_KEY`. La clave privada solo pertenece a Identity; los demás microservicios validarán tokens mediante `/.well-known/jwks.json`.
 3. Ejecute:
 
 ```bash

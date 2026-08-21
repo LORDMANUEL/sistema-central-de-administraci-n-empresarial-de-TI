@@ -16,9 +16,6 @@ from .schemas import (
     UserStatusUpdate,
 )
 from .security import (
-    create_access_token,
-    create_refresh_token,
-    decode_token,
     get_current_user,
     hash_password,
     require_roles,
@@ -30,10 +27,9 @@ BOOTSTRAP_STATE_KEY = "bootstrap_completed"
 
 
 def _token_pair(user: User, request: Request) -> TokenPair:
-    settings = request.app.state.settings
     return TokenPair(
-        access_token=create_access_token(user, settings),
-        refresh_token=create_refresh_token(user, settings),
+        access_token=request.app.state.tokens.create_access_token(user),
+        refresh_token=request.app.state.tokens.create_refresh_token(user),
     )
 
 
@@ -103,7 +99,7 @@ def refresh(
     request: Request,
     session: Session = Depends(get_db),
 ) -> TokenPair:
-    claims = decode_token(payload.refresh_token, request.app.state.settings, "refresh")
+    claims = request.app.state.tokens.decode(payload.refresh_token, "refresh")
     user = session.get(User, claims["sub"])
     if user is None:
         raise GuardianError(

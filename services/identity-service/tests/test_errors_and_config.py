@@ -34,11 +34,11 @@ def test_unknown_route_uses_guardian_error_contract(tmp_path):
     assert response.json()["error"]["request_id"]
 
 
-def test_production_rejects_default_jwt_secret():
+def test_production_rejects_default_signing_key():
     with pytest.raises(ValidationError):
         Settings(environment="production")
 
 
-def test_jwt_secret_must_have_at_least_32_characters():
+def test_signing_key_must_decode_to_exactly_32_bytes():
     with pytest.raises(ValidationError):
-        Settings(jwt_secret="too-short")
+        Settings(signing_key="too-short")

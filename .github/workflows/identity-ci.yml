@@ -50,5 +50,5 @@ jobs:
       - name: Validate Compose
         env:
           POSTGRES_PASSWORD: ci-password-not-for-production
-          IDENTITY_JWT_SECRET: ci-secret-value-at-least-32-characters-long
+          IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
         run: docker compose config --quiet

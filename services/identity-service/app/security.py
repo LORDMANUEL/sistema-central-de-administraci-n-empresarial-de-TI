@@ -1,3 +1,4 @@
+import base64
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import uuid4
@@ -5,6 +6,8 @@ from uuid import uuid4
 import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import Depends, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import ExpiredSignatureError, InvalidTokenError
@@ -31,48 +34,91 @@ def verify_password(password_hash: str, password: str) -> bool:
         return False
 
 
-def _create_token(user: User, settings: Settings, token_type: TokenType) -> str:
-    now = datetime.now(UTC)
-    if token_type == "access":
-        expires_at = now + timedelta(minutes=settings.access_token_minutes)
-    else:
-        expires_at = now + timedelta(days=settings.refresh_token_days)
-
-    payload = {
-        "sub": user.id,
-        "role": user.role.value,
-        "type": token_type,
-        "iat": now,
-        "exp": expires_at,
-        "jti": str(uuid4()),
-    }
-    return jwt.encode(payload, settings.jwt_secret.get_secret_value(), algorithm="HS256")
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
-def create_access_token(user: User, settings: Settings) -> str:
-    return _create_token(user, settings, "access")
+class TokenService:
+    algorithm = "EdDSA"
 
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.private_key = Ed25519PrivateKey.from_private_bytes(settings.signing_seed)
+        self.public_key = self.private_key.public_key()
 
-def create_refresh_token(user: User, settings: Settings) -> str:
-    return _create_token(user, settings, "refresh")
+    def _create(self, user: User, token_type: TokenType) -> str:
+        now = datetime.now(UTC)
+        if token_type == "access":
+            expires_at = now + timedelta(minutes=self.settings.access_token_minutes)
+        else:
+            expires_at = now + timedelta(days=self.settings.refresh_token_days)
 
-
-def decode_token(token: str, settings: Settings, expected_type: TokenType) -> dict[str, Any]:
-    try:
-        payload = jwt.decode(
-            token,
-            settings.jwt_secret.get_secret_value(),
-            algorithms=["HS256"],
-            options={"require": ["sub", "role", "type", "iat", "exp", "jti"]},
+        payload = {
+            "sub": user.id,
+            "role": user.role.value,
+            "type": token_type,
+            "iss": self.settings.jwt_issuer,
+            "aud": self.settings.jwt_audience,
+            "iat": now,
+            "exp": expires_at,
+            "jti": str(uuid4()),
+        }
+        return jwt.encode(
+            payload,
+            self.private_key,
+            algorithm=self.algorithm,
+            headers={"kid": self.settings.jwt_key_id, "typ": "JWT"},
         )
-    except ExpiredSignatureError as exc:
-        raise GuardianError(401, "identity.token_expired", "Token has expired") from exc
-    except InvalidTokenError as exc:
-        raise GuardianError(401, "identity.invalid_token", "Invalid token") from exc
 
-    if payload.get("type") != expected_type:
-        raise GuardianError(401, "identity.invalid_token_type", "Invalid token type")
-    return payload
+    def create_access_token(self, user: User) -> str:
+        return self._create(user, "access")
+
+    def create_refresh_token(self, user: User) -> str:
+        return self._create(user, "refresh")
+
+    def decode(self, token: str, expected_type: TokenType) -> dict[str, Any]:
+        try:
+            header = jwt.get_unverified_header(token)
+            if header.get("kid") != self.settings.jwt_key_id:
+                raise GuardianError(401, "identity.unknown_signing_key", "Unknown signing key")
+            payload = jwt.decode(
+                token,
+                self.public_key,
+                algorithms=[self.algorithm],
+                issuer=self.settings.jwt_issuer,
+                audience=self.settings.jwt_audience,
+                options={
+                    "require": ["sub", "role", "type", "iss", "aud", "iat", "exp", "jti"]
+                },
+            )
+        except GuardianError:
+            raise
+        except ExpiredSignatureError as exc:
+            raise GuardianError(401, "identity.token_expired", "Token has expired") from exc
+        except InvalidTokenError as exc:
+            raise GuardianError(401, "identity.invalid_token", "Invalid token") from exc
+
+        if payload.get("type") != expected_type:
+            raise GuardianError(401, "identity.invalid_token_type", "Invalid token type")
+        return payload
+
+    def jwks(self) -> dict[str, list[dict[str, str]]]:
+        raw_public_key = self.public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        return {
+            "keys": [
+                {
+                    "kty": "OKP",
+                    "crv": "Ed25519",
+                    "x": _b64url(raw_public_key),
+                    "use": "sig",
+                    "alg": self.algorithm,
+                    "kid": self.settings.jwt_key_id,
+                }
+            ]
+        }
 
 
 def get_current_user(
@@ -87,7 +133,7 @@ def get_current_user(
             "Authentication is required",
         )
 
-    claims = decode_token(credentials.credentials, request.app.state.settings, "access")
+    claims = request.app.state.tokens.decode(credentials.credentials, "access")
     user = session.get(User, claims["sub"])
     if user is None:
         raise GuardianError(

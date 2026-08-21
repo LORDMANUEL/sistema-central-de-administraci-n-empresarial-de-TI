@@ -6,7 +6,8 @@ Identity, authentication and RBAC microservice for IT Guardian.
 
 - one-time transactional platform bootstrap;
 - Argon2 password hashing;
-- access and refresh JWTs with distinct token types and `jti`;
+- Ed25519/EdDSA access and refresh JWTs with `kid`, `iss`, `aud`, distinct token types and `jti`;
+- public `/.well-known/jwks.json` for zero-secret verification by other microservices;
 - active/disabled account enforcement;
 - current-user endpoint;
 - platform-admin user creation, listing and status management;
@@ -24,6 +25,7 @@ Identity, authentication and RBAC microservice for IT Guardian.
 | GET | `/health/live` | Process liveness |
 | GET | `/health/ready` | Database readiness |
 | GET | `/metrics` | Prometheus metrics |
+| GET | `/.well-known/jwks.json` | Public Ed25519 signing key set |
 | POST | `/api/v1/auth/bootstrap` | Create first platform administrator once |
 | POST | `/api/v1/auth/login` | Obtain access/refresh tokens |
 | POST | `/api/v1/auth/refresh` | Rotate token pair |
@@ -58,11 +60,11 @@ For PostgreSQL use `postgresql+psycopg://user:password@host:5432/database`.
 Apply migrations first, then:
 
 ```bash
-export IDENTITY_JWT_SECRET='replace-with-a-random-secret-of-at-least-32-characters'
+export IDENTITY_SIGNING_KEY="$(python -c \"import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b'=') .decode())\")"
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Production refuses the development JWT secret.
+Production refuses the deterministic development signing seed. `IDENTITY_SIGNING_KEY` is a URL-safe base64 encoding of exactly 32 private bytes. Never distribute it to other services; they consume JWKS instead.
 
 ## Bootstrap example
 
@@ -72,4 +74,4 @@ curl -X POST http://localhost:8001/api/v1/auth/bootstrap \
   -d '{"email":"admin@example.com","display_name":"Platform Admin","password":"use-a-long-unique-password"}'
 ```
 
-Bootstrap returns HTTP 409 after completion even if the original administrator row is later removed; the completion state is persistent and transactional.
+Bootstrap returns HTTP 409 after bootstrap has completed, even if the original administrator row is later removed.

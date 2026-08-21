@@ -17,6 +17,7 @@ from .errors import (
 )
 from .logging import install_http_logging
 from .metrics import install_metrics
+from .security import TokenService
 
 
 def create_app(*, database_url: str | None = None, auto_create_schema: bool | None = None) -> FastAPI:
@@ -26,7 +27,10 @@ def create_app(*, database_url: str | None = None, auto_create_schema: bool | No
             service_name=settings.service_name,
             environment=settings.environment,
             database_url=database_url,
-            jwt_secret=settings.jwt_secret,
+            signing_key=settings.signing_key,
+            jwt_key_id=settings.jwt_key_id,
+            jwt_issuer=settings.jwt_issuer,
+            jwt_audience=settings.jwt_audience,
             access_token_minutes=settings.access_token_minutes,
             refresh_token_days=settings.refresh_token_days,
         )
@@ -48,6 +52,7 @@ def create_app(*, database_url: str | None = None, auto_create_schema: bool | No
     )
     app.state.settings = settings
     app.state.database = database
+    app.state.tokens = TokenService(settings)
     app.middleware("http")(request_id_middleware)
     app.state.metrics = install_metrics(app)
     install_http_logging(app, settings.service_name)
@@ -55,6 +60,10 @@ def create_app(*, database_url: str | None = None, auto_create_schema: bool | No
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_error_handler)
     app.include_router(router)
+
+    @app.get("/.well-known/jwks.json", include_in_schema=False)
+    def jwks() -> dict[str, list[dict[str, str]]]:
+        return app.state.tokens.jwks()
 
     @app.get("/health/live")
     def health_live() -> dict[str, str]:
