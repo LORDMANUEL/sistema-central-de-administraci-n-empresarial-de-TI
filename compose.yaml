@@ -1,0 +1,41 @@
+name: it-guardian
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-guardian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-guardian_identity}
+    volumes:
+      - guardian-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  identity-service:
+    build:
+      context: ./services/identity-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      IDENTITY_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      IDENTITY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-guardian_identity}
+      IDENTITY_JWT_SECRET: ${IDENTITY_JWT_SECRET:?IDENTITY_JWT_SECRET is required}
+      IDENTITY_ACCESS_TOKEN_MINUTES: ${IDENTITY_ACCESS_TOKEN_MINUTES:-15}
+      IDENTITY_REFRESH_TOKEN_DAYS: ${IDENTITY_REFRESH_TOKEN_DAYS:-7}
+    ports:
+      - "${IDENTITY_PORT:-8001}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  guardian-postgres:
