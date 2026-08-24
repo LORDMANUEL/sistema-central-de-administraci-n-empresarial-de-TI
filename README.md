@@ -6,9 +6,9 @@ IT Guardian unifica endpoints, servidores, móviles, impresoras, red, seguridad,
 
 ## Estado
 
-**Rama activa:** `feature/v0.1.0-foundation`  
-**Versión:** `0.1.0-dev.2`  
-**Primer servicio:** Identity Service
+**Rama activa:** `feature/v0.2.0-tenant`  
+**Versión:** `0.2.0-dev.1`  
+**Servicios terminados en la rama:** Identity Service + Tenant Service
 
 La rama `main` se conserva como línea estable. Los módulos se terminan, prueban y documentan antes de promoverse.
 
@@ -25,8 +25,7 @@ Incluye el primer corte de Identity Service:
 
 - bootstrap único y transaccional del `platform_admin`;
 - Argon2;
-- JWT Ed25519/EdDSA access/refresh con `kid`, issuer y audience;
-- JWKS público para validación inter-servicio sin compartir clave privada;
+- JWT access/refresh tipados;
 - RBAC inicial;
 - alta/listado/activación de usuarios;
 - errores normalizados con `request_id`;
@@ -36,6 +35,19 @@ Incluye el primer corte de Identity Service:
 - migración Alembic;
 - PostgreSQL + Docker Compose;
 - CI con tests y smoke test de migraciones.
+
+## v0.2.0 Tenant Service
+
+La rama v0.2 añade el límite empresarial que usarán todos los activos posteriores:
+
+- empresas/tenants y suspensión;
+- membresías y roles por tenant;
+- sedes con ubicación;
+- departamentos jerárquicos con protección de ciclos;
+- validación de JWT por JWKS, sin compartir la clave privada de Identity;
+- outbox transaccional + NATS JetStream;
+- API y worker separados;
+- BD `guardian_tenant` independiente de `guardian_identity`.
 
 ## Arranque Docker
 

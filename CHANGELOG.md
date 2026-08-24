@@ -2,6 +2,20 @@
 
 All notable IT Guardian changes are documented here.
 
+## [0.2.0-dev.1] - 2026-08-21
+
+### Added
+- Tenant Service with tenants, memberships, sites and hierarchical departments.
+- Tenant-scoped authorization backed by Identity Ed25519 JWKS.
+- Suspended-tenant and inactive-membership enforcement.
+- Transactional outbox with NATS JetStream worker and idempotent event IDs.
+- Tenant Prometheus metrics, structured request logs and stable error contracts.
+- Independent `guardian_tenant` database migration and Docker image.
+
+### Tests
+- 25 local Tenant Service tests passing before packaging.
+- Alembic upgrade/downgrade/upgrade round-trip verified locally.
+
 ## [0.1.0-dev.2] - 2026-08-21
 
 ### Security
