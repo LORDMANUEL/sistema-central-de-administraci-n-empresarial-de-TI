@@ -12,6 +12,7 @@ from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
 from .errors import GuardianError, guardian_error_handler, request_id_middleware
 from .grants import EnrollmentGrantVerifier
+from .rotation_api import router as rotation_router
 from .tenant_client import TenantAccessClient
 
 
@@ -67,6 +68,7 @@ def create_app(
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
     app.include_router(router)
+    app.include_router(rotation_router)
 
     @app.get("/health/live")
     def health_live() -> dict[str, str]:
