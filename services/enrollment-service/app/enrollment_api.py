@@ -27,11 +27,7 @@ def _result(enrollment: DeviceEnrollment) -> EnrollmentResult:
         enrollment.certificate_not_after,
     )
     if enrollment.status != EnrollmentStatus.ENROLLED or not all(required):
-        raise GuardianError(
-            409,
-            "enrollment.not_complete",
-            "Device enrollment is not complete",
-        )
+        raise GuardianError(409, "enrollment.not_complete", "Device enrollment is not complete")
     return EnrollmentResult(
         status="enrolled",
         device_id=enrollment.device_id,
@@ -45,6 +41,58 @@ def _result(enrollment: DeviceEnrollment) -> EnrollmentResult:
         not_before=enrollment.certificate_not_before,
         not_after=enrollment.certificate_not_after,
     )
+
+
+def _persist_pki_failure(
+    session: Session,
+    *,
+    enrollment_id: str,
+    token_id: str,
+    error: GuardianError,
+) -> None:
+    enrollment = session.scalar(
+        select(DeviceEnrollment)
+        .where(DeviceEnrollment.id == enrollment_id)
+        .with_for_update()
+    )
+    token = session.scalar(
+        select(EnrollmentToken)
+        .where(EnrollmentToken.id == token_id)
+        .with_for_update()
+    )
+    if enrollment is None or token is None:
+        session.rollback()
+        return
+
+    enrollment.failure_code = error.code
+    enrollment.failure_message = "PKI certificate issuance did not complete"
+
+    if error.code == "enrollment.pki_rejected" and enrollment.certificate_id is None:
+        enrollment.status = EnrollmentStatus.FAILED
+        token.reserved_at = None
+        token.reserved_enrollment_id = None
+        session.add(
+            OutboxEvent(
+                event_type="device.enrollment.failed",
+                aggregate_type="device",
+                aggregate_id=enrollment.device_id,
+                payload={
+                    "device_id": enrollment.device_id,
+                    "tenant_id": enrollment.tenant_id,
+                    "asset_id": enrollment.asset_id,
+                    "platform": enrollment.platform,
+                    "hostname": enrollment.hostname,
+                    "failure_code": error.code,
+                    "failed_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        )
+    else:
+        # Network/5xx uncertainty and issuance conflicts keep the reservation
+        # and stable IDs. Retrying with the same request cannot roll identity.
+        enrollment.status = EnrollmentStatus.PENDING
+
+    session.commit()
 
 
 @router.post("/enrollments", response_model=EnrollmentResult, status_code=status.HTTP_201_CREATED)
@@ -67,9 +115,6 @@ def enroll_device(
         response.status_code = status.HTTP_200_OK
         return _result(reservation.enrollment)
 
-    # Persist stable device_id + issuance_id before crossing the network. If
-    # the PKI call succeeds but this HTTP request is lost, the next identical
-    # request resumes the same reservation and reuses the same issuance ID.
     session.commit()
     enrollment_id = reservation.enrollment.id
     token_id = reservation.token.id
@@ -85,16 +130,26 @@ def enroll_device(
         issuance_id=reservation.enrollment.issuance_id,
         csr_sha256=reservation.enrollment.csr_sha256,
     )
-    certificate = request.app.state.pki_client.issue(
-        grant=grant,
-        issuance_id=reservation.enrollment.issuance_id,
-        tenant_id=reservation.enrollment.tenant_id,
-        asset_id=reservation.enrollment.asset_id,
-        device_id=reservation.enrollment.device_id,
-        platform=reservation.enrollment.platform,
-        subject_cn=reservation.enrollment.hostname,
-        csr_pem=payload.csr_pem,
-    )
+
+    try:
+        certificate = request.app.state.pki_client.issue(
+            grant=grant,
+            issuance_id=reservation.enrollment.issuance_id,
+            tenant_id=reservation.enrollment.tenant_id,
+            asset_id=reservation.enrollment.asset_id,
+            device_id=reservation.enrollment.device_id,
+            platform=reservation.enrollment.platform,
+            subject_cn=reservation.enrollment.hostname,
+            csr_pem=payload.csr_pem,
+        )
+    except GuardianError as exc:
+        _persist_pki_failure(
+            session,
+            enrollment_id=enrollment_id,
+            token_id=token_id,
+            error=exc,
+        )
+        raise
 
     enrollment = session.scalar(
         select(DeviceEnrollment)
@@ -109,8 +164,6 @@ def enroll_device(
     if enrollment is None or token is None:
         raise GuardianError(409, "enrollment.state_inconsistent", "Enrollment state is inconsistent")
 
-    # A competing identical retry may have finalized while this request was
-    # waiting on PKI. Return the committed result instead of duplicating event.
     if enrollment.status == EnrollmentStatus.ENROLLED and token.consumed_at is not None:
         session.rollback()
         response.status_code = status.HTTP_200_OK
