@@ -7,7 +7,9 @@ from .asset_client import AssetClient
 from .auth import IdentityAccessVerifier
 from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
+from .enrollment_api import router as enrollment_router
 from .errors import GuardianError, guardian_error_handler, request_id_middleware
+from .pki_client import PKIClient
 from .signing import EnrollmentGrantSigner
 from .tenant_client import TenantAccessClient
 
@@ -47,9 +49,15 @@ def create_app(*, database_url: str | None = None, signing_key: str | None = Non
         settings.asset_service_url,
         timeout_seconds=settings.downstream_timeout_seconds,
     )
+    app.state.pki_client = PKIClient(
+        settings.pki_service_url,
+        timeout_seconds=settings.downstream_timeout_seconds,
+        retry_attempts=settings.pki_retry_attempts,
+    )
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
     app.include_router(admin_router)
+    app.include_router(enrollment_router)
 
     @app.get("/health/live")
     def health_live() -> dict[str, str]:
