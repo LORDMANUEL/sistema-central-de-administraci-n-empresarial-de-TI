@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from .admin_api import router as admin_router
 from .asset_client import AssetClient
@@ -9,6 +9,7 @@ from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
 from .enrollment_api import router as enrollment_router
 from .errors import GuardianError, guardian_error_handler, request_id_middleware
+from .metrics import render_metrics
 from .pki_client import PKIClient
 from .signing import EnrollmentGrantSigner
 from .tenant_client import TenantAccessClient
@@ -78,6 +79,11 @@ def create_app(*, database_url: str | None = None, signing_key: str | None = Non
         if app.state.signer is None:
             raise GuardianError(503, "enrollment.signer_unavailable", "Enrollment signing material is unavailable")
         return app.state.signer.jwks()
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        payload, content_type = render_metrics()
+        return Response(content=payload, media_type=content_type)
 
     return app
 
