@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from .admin_api import router as admin_router
 from .asset_client import AssetClient
 from .auth import IdentityAccessVerifier
 from .config import Settings, get_settings
@@ -48,6 +49,7 @@ def create_app(*, database_url: str | None = None, signing_key: str | None = Non
     )
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
+    app.include_router(admin_router)
 
     @app.get("/health/live")
     def health_live() -> dict[str, str]:
