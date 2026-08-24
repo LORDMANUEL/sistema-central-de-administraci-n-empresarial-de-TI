@@ -5,12 +5,16 @@ on:
     branches: [main, develop, "feature/**", "release/**"]
     paths:
       - "services/pki-service/**"
+      - "tests/e2e/pki_smoke.py"
+      - "tests/e2e/pki_jwks_fixture.py"
       - ".github/workflows/pki-ci.yml"
       - "compose.yaml"
       - ".env.example"
   pull_request:
     paths:
       - "services/pki-service/**"
+      - "tests/e2e/pki_smoke.py"
+      - "tests/e2e/pki_jwks_fixture.py"
       - ".github/workflows/pki-ci.yml"
       - "compose.yaml"
       - ".env.example"
@@ -44,3 +48,24 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build non-root PKI image
+        run: docker build -t it-guardian-pki:ci services/pki-service
+      - name: Verify runtime user is non-root
+        run: |
+          uid="$(docker run --rm --entrypoint sh it-guardian-pki:ci -c 'id -u')"
+          test "$uid" != "0"
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-password-not-for-production
+          IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+        run: docker compose config --quiet
