@@ -15,6 +15,7 @@ from .auth import IdentityPrincipal, current_principal, enforce_pki_admin
 from .certificates import build_crl, issue_device_certificate, parse_and_validate_csr
 from .database import get_db
 from .errors import GuardianError
+from .metrics import CERTIFICATES_ISSUED, CERTIFICATES_REVOKED
 from .models import Certificate, CertificateStatus, OutboxEvent
 from .schemas import CertificateResponse, IssueCertificateRequest, RevokeCertificateRequest
 
@@ -225,6 +226,7 @@ def issue_certificate(
             return _response(concurrent, ca_chain_pem)
         raise GuardianError(409, "pki.issuance_conflict", "Issuance ID conflicts with existing certificate data") from exc
 
+    CERTIFICATES_ISSUED.inc()
     session.refresh(certificate)
     return _response(certificate, ca_chain_pem)
 
@@ -294,5 +296,6 @@ def revoke_certificate(
         )
     )
     session.commit()
+    CERTIFICATES_REVOKED.inc()
     session.refresh(certificate)
     return _response(certificate, ca_chain_pem)
