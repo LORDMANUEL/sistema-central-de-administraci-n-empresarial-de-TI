@@ -4,7 +4,7 @@ from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from .api import router
 from .auth import IdentityAccessVerifier
@@ -12,6 +12,7 @@ from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
 from .errors import GuardianError, guardian_error_handler, request_id_middleware
 from .grants import EnrollmentGrantVerifier
+from .metrics import render_metrics
 from .rotation_api import router as rotation_router
 from .tenant_client import TenantAccessClient
 
@@ -82,6 +83,11 @@ def create_app(
             raise GuardianError(503, "pki.database_unavailable", "PKI database is unavailable") from exc
         _signer_ready(settings.ca_cert_path, settings.ca_key_path)
         return {"status": "ready", "service": settings.service_name}
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        payload, content_type = render_metrics()
+        return Response(content=payload, media_type=content_type)
 
     return app
 
