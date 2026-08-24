@@ -10,6 +10,7 @@ from .asset_client import validate_asset_tenant
 from .auth import IdentityPrincipal, current_principal, enforce_enrollment_admin
 from .database import get_db
 from .errors import GuardianError
+from .metrics import TOKENS_CREATED, TOKENS_REVOKED
 from .models import DeviceEnrollment, EnrollmentStatus, EnrollmentToken, OutboxEvent
 from .schemas import (
     CreateEnrollmentTokenRequest,
@@ -151,6 +152,7 @@ def create_enrollment_token(
         )
     )
     session.commit()
+    TOKENS_CREATED.inc()
     session.refresh(token)
     read = _read(token)
     return EnrollmentTokenCreated(**read.model_dump(), token=plain.plaintext)
@@ -200,6 +202,7 @@ def revoke_enrollment_token(
         )
     )
     session.commit()
+    TOKENS_REVOKED.inc()
     session.refresh(token)
     return _read(token)
 
