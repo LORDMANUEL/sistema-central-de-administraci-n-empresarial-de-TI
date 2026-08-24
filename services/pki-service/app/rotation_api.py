@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -14,6 +13,7 @@ from .api import _load_signer_and_chain, _public_key_der, _response, _same_issua
 from .certificates import issue_device_certificate, parse_and_validate_csr
 from .database import get_db
 from .errors import GuardianError
+from .metrics import CERTIFICATES_ROTATED
 from .models import Certificate, CertificateStatus, OutboxEvent
 from .schemas import CertificateResponse, RotateCertificateRequest
 
@@ -29,10 +29,7 @@ def _require_rotation_grant(
 ) -> None:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise GuardianError(401, "pki.enrollment_grant_required", "Enrollment rotation grant is required")
-    grant = request.app.state.grant_verifier.verify(
-        credentials.credentials,
-        expected_type="certificate_rotate",
-    )
+    grant = request.app.state.grant_verifier.verify(credentials.credentials, expected_type="certificate_rotate")
     if (
         grant.tenant_id != payload.tenant_id
         or grant.asset_id != payload.asset_id
@@ -43,12 +40,7 @@ def _require_rotation_grant(
         raise GuardianError(403, "pki.grant_binding_mismatch", "Enrollment grant does not match rotation request")
 
 
-def _same_rotation(
-    existing: Certificate,
-    old: Certificate,
-    payload: RotateCertificateRequest,
-    csr_sha256: str,
-) -> bool:
+def _same_rotation(existing: Certificate, old: Certificate, payload: RotateCertificateRequest, csr_sha256: str) -> bool:
     return existing.replaces_certificate_id == old.id and _same_issuance(existing, payload, csr_sha256)
 
 
@@ -151,5 +143,6 @@ def rotate_certificate(
             return _response(concurrent, ca_chain_pem)
         raise GuardianError(409, "pki.issuance_conflict", "Rotation issuance conflicts with existing certificate data") from exc
 
+    CERTIFICATES_ROTATED.inc()
     session.refresh(replacement)
     return _response(replacement, ca_chain_pem)
