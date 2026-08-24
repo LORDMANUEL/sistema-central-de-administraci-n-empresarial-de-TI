@@ -2,6 +2,22 @@
 
 All notable IT Guardian changes are documented here.
 
+## [0.3.0-dev.1] - 2026-08-23
+
+### Added
+- Product roadmap focused on end-to-end functional gates.
+- Asset Service canonical domain foundation.
+- Stable `guardian_asset_id`, tenant/site/department references and asset classification.
+- External identity correlation for engines such as Tactical RMM, Wazuh, GLPI and NetBox.
+- Transactional outbox events `asset.created` and `asset.external_identity.linked`.
+- Identity Ed25519/JWKS token verification.
+- Health/readiness, Prometheus metrics and request IDs.
+- Asset database migration, non-root Docker image and Compose integration.
+- Asset CI gates for tests, migration round-trip, Docker build and Compose validation.
+
+### Current gate
+- Asset administrative endpoints intentionally require `platform_admin` until tenant-scoped inter-service authorization is completed and tested before promotion to v0.3.0.
+
 ## [0.2.0-dev.1] - 2026-08-21
 
 ### Added
