@@ -15,6 +15,10 @@ class IssueCertificateRequest(BaseModel):
     csr_pem: str = Field(min_length=1, max_length=32768)
 
 
+class RotateCertificateRequest(IssueCertificateRequest):
+    certificate_id: str = Field(min_length=1, max_length=128)
+
+
 class RevokeCertificateRequest(BaseModel):
     reason: str = Field(default="unspecified", pattern="^(unspecified|key_compromise|affiliation_changed|superseded|cessation_of_operation|privilege_withdrawn)$")
 
