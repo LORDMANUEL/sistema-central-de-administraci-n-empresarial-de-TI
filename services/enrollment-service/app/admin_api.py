@@ -10,8 +10,13 @@ from .asset_client import validate_asset_tenant
 from .auth import IdentityPrincipal, current_principal, enforce_enrollment_admin
 from .database import get_db
 from .errors import GuardianError
-from .models import EnrollmentToken, OutboxEvent
-from .schemas import CreateEnrollmentTokenRequest, EnrollmentTokenCreated, EnrollmentTokenRead
+from .models import DeviceEnrollment, EnrollmentStatus, EnrollmentToken, OutboxEvent
+from .schemas import (
+    CreateEnrollmentTokenRequest,
+    EnrollmentAdminRead,
+    EnrollmentTokenCreated,
+    EnrollmentTokenRead,
+)
 from .tokens import generate_enrollment_token
 
 router = APIRouter(prefix="/api/v1")
@@ -62,11 +67,45 @@ def _read(token: EnrollmentToken) -> EnrollmentTokenRead:
     )
 
 
+def _enrollment_read(enrollment: DeviceEnrollment) -> EnrollmentAdminRead:
+    return EnrollmentAdminRead(
+        device_id=enrollment.device_id,
+        tenant_id=enrollment.tenant_id,
+        asset_id=enrollment.asset_id,
+        platform=enrollment.platform,
+        hostname=enrollment.hostname,
+        agent_version=enrollment.agent_version,
+        status=(
+            enrollment.status.value
+            if isinstance(enrollment.status, EnrollmentStatus)
+            else str(enrollment.status)
+        ),
+        certificate_id=enrollment.certificate_id,
+        certificate_serial_hex=enrollment.certificate_serial_hex,
+        certificate_fingerprint_sha256=enrollment.certificate_fingerprint_sha256,
+        certificate_not_before=enrollment.certificate_not_before,
+        certificate_not_after=enrollment.certificate_not_after,
+        failure_code=enrollment.failure_code,
+        created_at=enrollment.created_at,
+        updated_at=enrollment.updated_at,
+        enrolled_at=enrollment.enrolled_at,
+    )
+
+
 def _token_or_404(session: Session, token_id: str) -> EnrollmentToken:
     token = session.get(EnrollmentToken, token_id)
     if token is None:
         raise GuardianError(404, "enrollment.token_not_found", "Enrollment token not found")
     return token
+
+
+def _enrollment_or_404(session: Session, device_id: str) -> DeviceEnrollment:
+    enrollment = session.scalar(
+        select(DeviceEnrollment).where(DeviceEnrollment.device_id == device_id)
+    )
+    if enrollment is None:
+        raise GuardianError(404, "enrollment.not_found", "Device enrollment not found")
+    return enrollment
 
 
 @router.post(
@@ -163,3 +202,31 @@ def revoke_enrollment_token(
     session.commit()
     session.refresh(token)
     return _read(token)
+
+
+@router.get("/enrollments", response_model=list[EnrollmentAdminRead])
+def list_enrollments(
+    tenant_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    principal: IdentityPrincipal = Depends(current_principal),
+) -> list[EnrollmentAdminRead]:
+    _require_admin(request, principal, tenant_id)
+    enrollments = session.scalars(
+        select(DeviceEnrollment)
+        .where(DeviceEnrollment.tenant_id == tenant_id)
+        .order_by(DeviceEnrollment.created_at, DeviceEnrollment.device_id)
+    ).all()
+    return [_enrollment_read(enrollment) for enrollment in enrollments]
+
+
+@router.get("/enrollments/{device_id}", response_model=EnrollmentAdminRead)
+def get_enrollment(
+    device_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    principal: IdentityPrincipal = Depends(current_principal),
+) -> EnrollmentAdminRead:
+    enrollment = _enrollment_or_404(session, device_id)
+    _require_admin(request, principal, enrollment.tenant_id)
+    return _enrollment_read(enrollment)
