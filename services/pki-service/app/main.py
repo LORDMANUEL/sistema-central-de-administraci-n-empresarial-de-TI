@@ -7,10 +7,12 @@ from cryptography.hazmat.primitives import serialization
 from fastapi import FastAPI
 
 from .api import router
+from .auth import IdentityAccessVerifier
 from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
 from .errors import GuardianError, guardian_error_handler, request_id_middleware
 from .grants import EnrollmentGrantVerifier
+from .tenant_client import TenantAccessClient
 
 
 def _signer_ready(cert_path: str, key_path: str) -> None:
@@ -57,6 +59,11 @@ def create_app(
     app.state.session_factory = session_factory
     app.state.root_cert_path = settings.root_cert_path
     app.state.grant_verifier = EnrollmentGrantVerifier(settings)
+    app.state.identity_verifier = IdentityAccessVerifier(settings)
+    app.state.tenant_access_client = TenantAccessClient(
+        settings.tenant_service_url,
+        timeout_seconds=settings.tenant_access_timeout_seconds,
+    )
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
     app.include_router(router)
