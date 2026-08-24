@@ -36,3 +36,11 @@ jobs:
       - name: Test
         working-directory: services/enrollment-service
         run: python -m pytest -q
+      - name: Migration round-trip
+        working-directory: services/enrollment-service
+        env:
+          ENROLLMENT_DATABASE_URL: sqlite+pysqlite:///./ci-enrollment-migration.db
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
