@@ -12,8 +12,8 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 |---|---|---|
 | v0.1.0 | Foundation + Identity | ✅ DONE / main |
 | v0.2.0 | Tenant | ✅ DONE / main |
-| v0.3.0 | Asset Service | 🟡 EN CURSO — CI base verde; cerrando tenancy + E2E |
-| v0.4.0 | Enrollment + PKI | ⬜ BLOQUEADO por v0.3.0 |
+| v0.3.0 | Asset Service | 🟠 RC — funcional + E2E verde; pendiente promoción a `main` |
+| v0.4.0 | Enrollment + PKI | ⬜ BLOQUEADO hasta promover v0.3.0 |
 | v0.5.0 | Gateway + Audit | ⬜ PENDIENTE |
 | v0.6.0 | Agent Control + Command + Telemetry | ⬜ PENDIENTE |
 | v0.7.0 | Windows Agent Modern | ⬜ PENDIENTE |
@@ -41,18 +41,21 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 - [x] PostgreSQL de dominio independiente.
 - [x] Transactional outbox.
 - [x] Publicador NATS JetStream idempotente.
+- [x] Outbox resiliente: `attempts`, `last_error`, ACK antes de `published_at`, sin hot-loop por evento.
+- [x] Envelope de eventos común y versionado (`schema_version=1`).
 - [x] JWT Ed25519/JWKS.
 - [x] Health/readiness/métricas/request ID.
 - [x] Alembic.
 - [x] Docker no-root.
 - [x] CI base: tests + migración + Docker build + Compose config.
-- [x] Política tenant-scoped definida por TDD: platform_admin global, org_admin escritura, member lectura, tenant suspendido denegado.
-- [ ] Integrar resolución tenant-scoped contra Tenant Service sin compartir BD.
-- [ ] Validar tenant/site/department antes de persistir referencias.
-- [ ] E2E `Identity -> Tenant -> Asset`.
-- [ ] E2E `Asset -> Outbox -> NATS`.
-- [ ] Instalación limpia del stack.
-- [ ] CI final verde sobre el head candidato.
+- [x] Política tenant-scoped por TDD: platform_admin global, org_admin escritura, membresía activa lectura, tenant suspendido denegado.
+- [x] Resolución tenant-scoped contra Tenant Service sin compartir BD.
+- [x] Validación tenant/site/department antes de persistir referencias.
+- [x] E2E `Identity -> Tenant -> Asset`.
+- [x] E2E `Asset -> Outbox -> NATS JetStream`.
+- [x] Instalación limpia del stack en CI con `docker compose up -d --build` y teardown completo.
+- [x] CI de código y E2E verde sobre el candidato funcional previo a documentación final.
+- [ ] CI final verde sobre el SHA RC documentado.
 - [ ] PR #3 listo para review.
 - [ ] Merge a `main`.
 - [ ] Marcar v0.3.0 DONE.
