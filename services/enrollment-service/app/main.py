@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from .auth import IdentityAccessVerifier
 from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
 from .errors import GuardianError, guardian_error_handler, request_id_middleware
 from .signing import EnrollmentGrantSigner
+from .tenant_client import TenantAccessClient
 
 
 def create_app(*, database_url: str | None = None, signing_key: str | None = None) -> FastAPI:
@@ -33,6 +35,12 @@ def create_app(*, database_url: str | None = None, signing_key: str | None = Non
     app.state.session_factory = session_factory
     app.state.signer = signer
     app.state.signer_error = signer_error
+    app.state.identity_verifier = IdentityAccessVerifier(settings)
+    app.state.tenant_access_client = TenantAccessClient(
+        settings.tenant_service_url,
+        timeout_seconds=settings.downstream_timeout_seconds,
+    )
+    app.state.tenant_access_resolver = None
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
 
