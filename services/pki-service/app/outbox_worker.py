@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from .config import get_settings
 from .database import build_engine, build_session_factory
+from .metrics import OUTBOX_FAILED, OUTBOX_PUBLISHED
 from .models import OutboxEvent
 
 logger = logging.getLogger("guardian.pki.outbox")
@@ -69,12 +70,14 @@ async def publish_pending_once(
             except Exception as exc:
                 event.last_error = str(exc)[:2000]
                 session.commit()
+                OUTBOX_FAILED.inc()
                 failed += 1
                 continue
 
             event.published_at = datetime.now(UTC)
             event.last_error = None
             session.commit()
+            OUTBOX_PUBLISHED.inc()
             published += 1
 
     return {"published": published, "failed": failed}
