@@ -1,5 +1,7 @@
 # IT Guardian Asset Service
 
+**Release candidate actual:** `0.3.0-rc.1`
+
 Microservicio canónico de activos de IT Guardian.
 
 ## Responsabilidades
