@@ -5,13 +5,14 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, Response
 from sqlalchemy import text
 
+from . import models as _models  # noqa: F401
 from .api import router
 from .auth import AccessTokenVerifier
 from .config import Settings, get_settings
 from .database import Base, build_engine, build_session_factory
 from .errors import GuardianError, guardian_error_handler
 from .metrics import HTTP_REQUESTS, render_metrics
-from . import models as _models  # noqa: F401
+from .tenant_client import TenantAccessClient
 
 
 def create_app(*, database_url: str | None = None, auth_disabled: bool = False) -> FastAPI:
@@ -28,6 +29,12 @@ def create_app(*, database_url: str | None = None, auth_disabled: bool = False) 
     app.state.session_factory = session_factory
     app.state.auth_disabled = auth_disabled
     app.state.auth = AccessTokenVerifier(settings)
+    app.state.tenant_access_client = TenantAccessClient(
+        settings.tenant_service_url,
+        timeout_seconds=settings.tenant_access_timeout_seconds,
+    )
+    app.state.tenant_access_resolver = None
+    app.state.tenant_reference_validator = None
     app.add_exception_handler(GuardianError, guardian_error_handler)
     app.include_router(router)
 
