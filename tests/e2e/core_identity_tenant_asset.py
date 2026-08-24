@@ -45,7 +45,7 @@ def main() -> None:
     wait_ready(f"{TENANT}/health/ready")
     wait_ready(f"{ASSET}/health/ready")
 
-    email = "guardian-ci@example.invalid"
+    email = "guardian-ci@example.com"
     password = "Guardian-CI-Password-2026!"
     request(
         "POST",
