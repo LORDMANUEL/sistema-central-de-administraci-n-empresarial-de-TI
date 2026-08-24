@@ -150,3 +150,55 @@ def issue_device_certificate(
         not_before=certificate.not_valid_before_utc,
         not_after=certificate.not_valid_after_utc,
     )
+
+
+_REVOCATION_FLAGS = {
+    "unspecified": x509.ReasonFlags.unspecified,
+    "key_compromise": x509.ReasonFlags.key_compromise,
+    "affiliation_changed": x509.ReasonFlags.affiliation_changed,
+    "superseded": x509.ReasonFlags.superseded,
+    "cessation_of_operation": x509.ReasonFlags.cessation_of_operation,
+    "privilege_withdrawn": x509.ReasonFlags.privilege_withdrawn,
+}
+
+
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def build_crl(
+    revoked_certificates,
+    *,
+    signer_cert: x509.Certificate,
+    signer_key,
+    lifetime_hours: int = 24,
+) -> x509.CertificateRevocationList:
+    now = datetime.now(UTC)
+    builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(signer_cert.subject)
+        .last_update(now - timedelta(seconds=30))
+        .next_update(now + timedelta(hours=lifetime_hours))
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(signer_cert.public_key()),
+            critical=False,
+        )
+        .add_extension(x509.CRLNumber(max(1, int(now.timestamp()))), critical=False)
+    )
+
+    for certificate in revoked_certificates:
+        if certificate.revoked_at is None:
+            continue
+        reason = _REVOCATION_FLAGS.get(certificate.revocation_reason or "unspecified", x509.ReasonFlags.unspecified)
+        revoked = (
+            x509.RevokedCertificateBuilder()
+            .serial_number(int(certificate.serial_hex, 16))
+            .revocation_date(_utc(certificate.revoked_at))
+            .add_extension(x509.CRLReason(reason), critical=False)
+            .build()
+        )
+        builder = builder.add_revoked_certificate(revoked)
+
+    return builder.sign(private_key=signer_key, algorithm=hashes.SHA256())
