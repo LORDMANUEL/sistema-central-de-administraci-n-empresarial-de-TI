@@ -201,6 +201,112 @@ services:
     healthcheck:
       disable: true
 
+  pki-db-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-guardian}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      TARGET_DB: ${PKI_DB:-guardian_pki}
+    command:
+      - sh
+      - -ec
+      - |
+        case "$$TARGET_DB" in ''|*[!A-Za-z0-9_]*) echo "Invalid TARGET_DB" >&2; exit 2;; esac
+        exists="$$(psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$TARGET_DB'")"
+        if [ "$$exists" != "1" ]; then createdb "$$TARGET_DB"; fi
+
+  pki-ca-init:
+    build:
+      context: ./services/pki-service
+    restart: "no"
+    environment:
+      PKI_CA_ROOT_DIR: /var/lib/guardian/pki-root
+      PKI_CA_ONLINE_DIR: /var/lib/guardian/pki
+    volumes:
+      - guardian-pki-root:/var/lib/guardian/pki-root
+      - guardian-pki-online:/var/lib/guardian/pki
+    command: ["python", "-m", "app.ca_init"]
+    healthcheck:
+      disable: true
+
+  pki-migrate:
+    build:
+      context: ./services/pki-service
+    restart: "no"
+    depends_on:
+      pki-db-init:
+        condition: service_completed_successfully
+    environment:
+      PKI_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      PKI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${PKI_DB:-guardian_pki}
+    command: ["alembic", "upgrade", "head"]
+    healthcheck:
+      disable: true
+
+  pki-service:
+    build:
+      context: ./services/pki-service
+    restart: unless-stopped
+    depends_on:
+      pki-ca-init:
+        condition: service_completed_successfully
+      pki-migrate:
+        condition: service_completed_successfully
+      identity-service:
+        condition: service_healthy
+      tenant-service:
+        condition: service_healthy
+    environment:
+      PKI_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      PKI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${PKI_DB:-guardian_pki}
+      PKI_CA_CERT_PATH: /var/lib/guardian/pki/intermediate-ca-cert.pem
+      PKI_CA_KEY_PATH: /var/lib/guardian/pki/intermediate-ca-key.pem
+      PKI_ROOT_CERT_PATH: /var/lib/guardian/pki/root-ca-cert.pem
+      PKI_CERTIFICATE_LIFETIME_DAYS: ${PKI_CERTIFICATE_LIFETIME_DAYS:-30}
+      PKI_IDENTITY_JWKS_URL: http://identity-service:8000/.well-known/jwks.json
+      PKI_IDENTITY_ISSUER: ${IDENTITY_JWT_ISSUER:-urn:it-guardian:identity}
+      PKI_IDENTITY_AUDIENCE: ${IDENTITY_JWT_AUDIENCE:-it-guardian-services}
+      PKI_ENROLLMENT_JWKS_URL: http://enrollment-service:8000/.well-known/jwks.json
+      PKI_ENROLLMENT_ISSUER: ${ENROLLMENT_JWT_ISSUER:-urn:it-guardian:enrollment}
+      PKI_ENROLLMENT_AUDIENCE: ${ENROLLMENT_PKI_AUDIENCE:-it-guardian-pki}
+      PKI_TENANT_SERVICE_URL: http://tenant-service:8000
+      PKI_NATS_URL: nats://nats:4222
+      PKI_NATS_STREAM: GUARDIAN_EVENTS
+    volumes:
+      - guardian-pki-online:/var/lib/guardian/pki:ro
+    ports:
+      - "127.0.0.1:${PKI_PORT:-8004}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  pki-outbox-worker:
+    build:
+      context: ./services/pki-service
+    restart: unless-stopped
+    depends_on:
+      pki-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    environment:
+      PKI_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      PKI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${PKI_DB:-guardian_pki}
+      PKI_NATS_URL: nats://nats:4222
+      PKI_NATS_STREAM: GUARDIAN_EVENTS
+    command: ["python", "-m", "app.outbox_worker"]
+    healthcheck:
+      disable: true
+
 volumes:
   guardian-postgres:
   guardian-nats:
+  guardian-pki-root:
+  guardian-pki-online:
