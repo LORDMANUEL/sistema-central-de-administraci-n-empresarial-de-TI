@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from cryptography import x509
@@ -10,11 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .certificates import issue_device_certificate, parse_and_validate_csr
+from .auth import IdentityPrincipal, current_principal, enforce_pki_admin
+from .certificates import build_crl, issue_device_certificate, parse_and_validate_csr
 from .database import get_db
 from .errors import GuardianError
 from .models import Certificate, CertificateStatus, OutboxEvent
-from .schemas import CertificateResponse, IssueCertificateRequest
+from .schemas import CertificateResponse, IssueCertificateRequest, RevokeCertificateRequest
 
 router = APIRouter(prefix="/api/v1")
 _bearer = HTTPBearer(auto_error=False)
@@ -75,6 +77,8 @@ def _response(existing: Certificate, ca_chain_pem: str) -> CertificateResponse:
         not_before=existing.not_before,
         not_after=existing.not_after,
         status=existing.status.value if isinstance(existing.status, CertificateStatus) else str(existing.status),
+        revoked_at=existing.revoked_at,
+        revocation_reason=existing.revocation_reason,
     )
 
 
@@ -99,6 +103,49 @@ def _require_issue_grant(
     ):
         raise GuardianError(403, "pki.grant_binding_mismatch", "Enrollment grant does not match certificate request")
     return grant
+
+
+def _tenant_resolver(request: Request):
+    override = getattr(request.app.state, "tenant_access_resolver", None)
+    if override is not None:
+        return override
+    return request.app.state.tenant_access_client.resolve
+
+
+def _require_management(request: Request, principal: IdentityPrincipal, tenant_id: str) -> None:
+    enforce_pki_admin(principal, tenant_id, _tenant_resolver(request))
+
+
+def _certificate_or_404(session: Session, certificate_id: str) -> Certificate:
+    certificate = session.get(Certificate, certificate_id)
+    if certificate is None:
+        raise GuardianError(404, "pki.certificate_not_found", "Certificate not found")
+    return certificate
+
+
+@router.get("/ca/chain")
+def ca_chain(request: Request) -> Response:
+    _, _, chain = _load_signer_and_chain(request)
+    return Response(content=chain, media_type="application/x-pem-file")
+
+
+@router.get("/ca/crl")
+def ca_crl(request: Request, session: Session = Depends(get_db)) -> Response:
+    signer_cert, signer_key, _ = _load_signer_and_chain(request)
+    revoked = list(
+        session.scalars(
+            select(Certificate)
+            .where(Certificate.status == CertificateStatus.REVOKED)
+            .order_by(Certificate.revoked_at, Certificate.id)
+        ).all()
+    )
+    crl = build_crl(
+        revoked,
+        signer_cert=signer_cert,
+        signer_key=signer_key,
+        lifetime_hours=request.app.state.settings.crl_lifetime_hours,
+    )
+    return Response(content=crl.public_bytes(serialization.Encoding.PEM), media_type="application/x-pem-file")
 
 
 @router.post("/certificates/issue", response_model=CertificateResponse, status_code=status.HTTP_201_CREATED)
@@ -178,5 +225,74 @@ def issue_certificate(
             return _response(concurrent, ca_chain_pem)
         raise GuardianError(409, "pki.issuance_conflict", "Issuance ID conflicts with existing certificate data") from exc
 
+    session.refresh(certificate)
+    return _response(certificate, ca_chain_pem)
+
+
+@router.get("/certificates", response_model=list[CertificateResponse])
+def list_certificates(
+    tenant_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    principal: IdentityPrincipal = Depends(current_principal),
+) -> list[CertificateResponse]:
+    _require_management(request, principal, tenant_id)
+    _, _, ca_chain_pem = _load_signer_and_chain(request)
+    certificates = session.scalars(
+        select(Certificate)
+        .where(Certificate.tenant_id == tenant_id)
+        .order_by(Certificate.issued_at, Certificate.id)
+    ).all()
+    return [_response(certificate, ca_chain_pem) for certificate in certificates]
+
+
+@router.get("/certificates/{certificate_id}", response_model=CertificateResponse)
+def get_certificate(
+    certificate_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    principal: IdentityPrincipal = Depends(current_principal),
+) -> CertificateResponse:
+    certificate = _certificate_or_404(session, certificate_id)
+    _require_management(request, principal, certificate.tenant_id)
+    _, _, ca_chain_pem = _load_signer_and_chain(request)
+    return _response(certificate, ca_chain_pem)
+
+
+@router.post("/certificates/{certificate_id}/revoke", response_model=CertificateResponse)
+def revoke_certificate(
+    certificate_id: str,
+    payload: RevokeCertificateRequest,
+    request: Request,
+    session: Session = Depends(get_db),
+    principal: IdentityPrincipal = Depends(current_principal),
+) -> CertificateResponse:
+    certificate = _certificate_or_404(session, certificate_id)
+    _require_management(request, principal, certificate.tenant_id)
+    _, _, ca_chain_pem = _load_signer_and_chain(request)
+
+    if certificate.status == CertificateStatus.REVOKED:
+        return _response(certificate, ca_chain_pem)
+
+    certificate.status = CertificateStatus.REVOKED
+    certificate.revoked_at = datetime.now(UTC)
+    certificate.revocation_reason = payload.reason
+    session.add(
+        OutboxEvent(
+            event_type="pki.certificate.revoked",
+            aggregate_type="certificate",
+            aggregate_id=certificate.id,
+            payload={
+                "certificate_id": certificate.id,
+                "tenant_id": certificate.tenant_id,
+                "asset_id": certificate.asset_id,
+                "device_id": certificate.device_id,
+                "serial_hex": certificate.serial_hex,
+                "reason": payload.reason,
+                "revoked_at": certificate.revoked_at.isoformat(),
+            },
+        )
+    )
+    session.commit()
     session.refresh(certificate)
     return _response(certificate, ca_chain_pem)
