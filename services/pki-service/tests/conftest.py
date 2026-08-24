@@ -14,14 +14,12 @@ def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
-@pytest.fixture
-def enrollment_crypto():
+def _ed25519_fixture(kid: str):
     private_key = Ed25519PrivateKey.generate()
     raw_public = private_key.public_key().public_bytes(
         serialization.Encoding.Raw,
         serialization.PublicFormat.Raw,
     )
-    kid = "enrollment-test-key"
     jwks = {
         "keys": [
             {
@@ -35,6 +33,11 @@ def enrollment_crypto():
         ]
     }
     return private_key, kid, jwks
+
+
+@pytest.fixture
+def enrollment_crypto():
+    return _ed25519_fixture("enrollment-test-key")
 
 
 @pytest.fixture
@@ -61,5 +64,32 @@ def make_grant(enrollment_crypto):
         headers = {"kid": overrides.pop("kid", kid)}
         headers.update(overrides.pop("headers", {}))
         return jwt.encode(claims, private_key, algorithm="EdDSA", headers=headers)
+
+    return factory
+
+
+@pytest.fixture
+def identity_crypto():
+    return _ed25519_fixture("identity-test-key")
+
+
+@pytest.fixture
+def make_identity_token(identity_crypto):
+    private_key, kid, _ = identity_crypto
+
+    def factory(*, role: str = "platform_admin", user_id: str = "user-1", **claim_overrides):
+        now = datetime.now(UTC)
+        claims = {
+            "iss": "urn:it-guardian:identity",
+            "aud": "it-guardian",
+            "type": "access",
+            "sub": user_id,
+            "role": role,
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(minutes=15)).timestamp()),
+            "jti": str(uuid4()),
+        }
+        claims.update(claim_overrides)
+        return jwt.encode(claims, private_key, algorithm="EdDSA", headers={"kid": kid})
 
     return factory
