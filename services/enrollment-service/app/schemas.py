@@ -49,3 +49,22 @@ class EnrollmentResult(BaseModel):
     ca_chain_pem: str
     not_before: datetime
     not_after: datetime
+
+
+class EnrollmentAdminRead(BaseModel):
+    device_id: str
+    tenant_id: str
+    asset_id: str
+    platform: str
+    hostname: str
+    agent_version: str | None
+    status: str
+    certificate_id: str | None
+    certificate_serial_hex: str | None
+    certificate_fingerprint_sha256: str | None
+    certificate_not_before: datetime | None
+    certificate_not_after: datetime | None
+    failure_code: str | None
+    created_at: datetime
+    updated_at: datetime
+    enrolled_at: datetime | None
