@@ -23,7 +23,7 @@ def create_app(*, database_url: str | None = None, auth_disabled: bool = False) 
     if settings.database_url.startswith("sqlite"):
         Base.metadata.create_all(engine)
 
-    app = FastAPI(title="IT Guardian Asset Service", version="0.3.0-dev.1")
+    app = FastAPI(title="IT Guardian Asset Service", version="0.3.0-rc.1")
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = session_factory
