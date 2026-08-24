@@ -2,6 +2,32 @@
 
 All notable IT Guardian changes are documented here.
 
+## [0.3.0-rc.1] - 2026-08-24
+
+### Added
+- Tenant-scoped Asset authorization through Tenant Service without cross-service database access.
+- `platform_admin` global access, `org_admin` tenant write access and read-only access for other active tenant memberships.
+- Tenant suspension enforcement in Asset Service.
+- Inter-service validation of `site_id` and `department_id` before asset persistence.
+- Clean-stack E2E gate covering `Identity -> Tenant -> Site/Department -> Asset`.
+- JetStream E2E assertion for `guardian.asset.created`.
+- Versioned event envelope shared with Tenant (`schema_version`, `type`, `data`).
+- Asset outbox delivery state with `attempts` and `last_error`.
+- Per-poll retry protection so one failed event is attempted at most once per polling cycle.
+- Operational Asset Service documentation for authorization, references, outbox recovery and clean-stack validation.
+
+### Security
+- Asset Service validates Identity Ed25519 JWTs and forwards only the caller bearer token to Tenant authorization endpoints.
+- Asset Service never reads Tenant tables and never receives the Identity private signing key.
+- Invalid, inactive or cross-tenant site/department references are rejected before persistence.
+
+### Verification
+- Identity Service CI: success on the Asset candidate path.
+- Tenant Service CI: success on the Asset candidate path.
+- Asset unit/integration suite, compile and Alembic round-trip: success.
+- Asset Docker image build and Compose validation: success.
+- Clean-stack `core-e2e`: success, including JetStream event delivery and teardown.
+
 ## [0.3.0-dev.1] - 2026-08-23
 
 ### Added
@@ -14,9 +40,6 @@ All notable IT Guardian changes are documented here.
 - Health/readiness, Prometheus metrics and request IDs.
 - Asset database migration, non-root Docker image and Compose integration.
 - Asset CI gates for tests, migration round-trip, Docker build and Compose validation.
-
-### Current gate
-- Asset administrative endpoints intentionally require `platform_admin` until tenant-scoped inter-service authorization is completed and tested before promotion to v0.3.0.
 
 ## [0.2.0-dev.1] - 2026-08-21
 
