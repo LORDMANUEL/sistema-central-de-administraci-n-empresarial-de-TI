@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .errors import GuardianError
-from .models import DeviceEnrollment, EnrollmentToken
+from .models import DeviceEnrollment, EnrollmentStatus, EnrollmentToken
 from .tokens import hash_token, request_fingerprint
 
 
@@ -84,6 +84,35 @@ def _resume_or_replay(
     )
 
 
+def _reset_failed_enrollment(
+    enrollment: DeviceEnrollment,
+    token: EnrollmentToken,
+    request_data: EnrollmentRequestData,
+    current_time: datetime,
+) -> ReservationResult:
+    enrollment.device_id = str(uuid4())
+    enrollment.platform = request_data.platform.strip().lower()
+    enrollment.hostname = request_data.hostname.strip()
+    enrollment.agent_version = (request_data.agent_version or "").strip() or None
+    enrollment.csr_sha256 = request_data.csr_sha256.strip().lower()
+    enrollment.request_fingerprint = _fingerprint(token, request_data)
+    enrollment.issuance_id = str(uuid4())
+    enrollment.status = EnrollmentStatus.PENDING
+    enrollment.certificate_id = None
+    enrollment.certificate_serial_hex = None
+    enrollment.certificate_fingerprint_sha256 = None
+    enrollment.certificate_pem = None
+    enrollment.ca_chain_pem = None
+    enrollment.certificate_not_before = None
+    enrollment.certificate_not_after = None
+    enrollment.failure_code = None
+    enrollment.failure_message = None
+    enrollment.enrolled_at = None
+    token.reserved_at = current_time
+    token.reserved_enrollment_id = enrollment.id
+    return ReservationResult(token=token, enrollment=enrollment, resumed=False, consumed=False)
+
+
 def reserve_or_resume(
     session: Session,
     token_plaintext: str,
@@ -101,8 +130,8 @@ def reserve_or_resume(
         raise GuardianError(404, "enrollment.token_not_found", "Enrollment token not found")
 
     # A completed enrollment remains retrievable by an identical retry even if
-    # the token is later expired/revoked; no new authority is granted because
-    # the request fingerprint and device identity must already match.
+    # the token is later expired/revoked; this returns existing public state and
+    # does not grant authority for a new enrollment.
     if token.consumed_at is not None:
         return _resume_or_replay(session, token, request_data, consumed=True)
 
@@ -110,12 +139,28 @@ def reserve_or_resume(
         raise GuardianError(409, "enrollment.token_revoked", "Enrollment token has been revoked")
 
     # Once a valid request reserved the token, transient downstream failures
-    # must remain recoverable with the same identity even after original TTL.
+    # remain recoverable with exactly the same identity even after original TTL.
     if token.reserved_at is not None or token.reserved_enrollment_id is not None:
         return _resume_or_replay(session, token, request_data, consumed=False)
 
     if _utc(token.expires_at) <= _utc(current_time):
         raise GuardianError(409, "enrollment.token_expired", "Enrollment token has expired")
+
+    # A deterministic failure before certificate issuance releases the token.
+    # v0.4 reuses the same audit row but rolls device/issuance identity so the
+    # corrected request is a logically new attempt without violating token_id's
+    # one-row uniqueness invariant.
+    previous = session.scalar(
+        select(DeviceEnrollment)
+        .where(DeviceEnrollment.token_id == token.id)
+        .with_for_update()
+    )
+    if previous is not None:
+        if previous.status != EnrollmentStatus.FAILED or previous.certificate_id is not None:
+            raise GuardianError(409, "enrollment.state_inconsistent", "Enrollment token state is inconsistent")
+        result = _reset_failed_enrollment(previous, token, request_data, current_time)
+        session.flush()
+        return result
 
     fingerprint = _fingerprint(token, request_data)
     enrollment = DeviceEnrollment(
