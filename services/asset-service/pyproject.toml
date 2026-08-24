@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "it-guardian-asset-service"
-version = "0.3.0.dev1"
+version = "0.3.0rc1"
 description = "IT Guardian canonical asset domain service"
 requires-python = ">=3.12"
 dependencies = [
