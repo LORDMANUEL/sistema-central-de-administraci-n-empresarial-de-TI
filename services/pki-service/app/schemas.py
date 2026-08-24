@@ -15,6 +15,10 @@ class IssueCertificateRequest(BaseModel):
     csr_pem: str = Field(min_length=1, max_length=32768)
 
 
+class RevokeCertificateRequest(BaseModel):
+    reason: str = Field(default="unspecified", pattern="^(unspecified|key_compromise|affiliation_changed|superseded|cessation_of_operation|privilege_withdrawn)$")
+
+
 class CertificateResponse(BaseModel):
     certificate_id: str
     issuance_id: str
@@ -31,3 +35,5 @@ class CertificateResponse(BaseModel):
     not_before: datetime
     not_after: datetime
     status: str
+    revoked_at: datetime | None = None
+    revocation_reason: str | None = None
