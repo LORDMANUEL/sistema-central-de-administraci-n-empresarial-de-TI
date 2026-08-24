@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from .asset_client import AssetClient
 from .auth import IdentityAccessVerifier
 from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
@@ -41,6 +42,10 @@ def create_app(*, database_url: str | None = None, signing_key: str | None = Non
         timeout_seconds=settings.downstream_timeout_seconds,
     )
     app.state.tenant_access_resolver = None
+    app.state.asset_client = AssetClient(
+        settings.asset_service_url,
+        timeout_seconds=settings.downstream_timeout_seconds,
+    )
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
 
