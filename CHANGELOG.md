@@ -2,6 +2,42 @@
 
 All notable IT Guardian changes are documented here.
 
+## [0.4.0-dev.1] - 2026-08-24
+
+### PKI Service
+- Added isolated `guardian_pki` database and Alembic migration.
+- Added Guardian Root CA RSA-4096 and Device Intermediate CA RSA-3072 with idempotent fail-safe initialization.
+- Device private keys remain on endpoints; PKI accepts signed CSR requests only.
+- Added RSA >=2048, EC P-256 and EC P-384 CSR support with weak/unsupported key rejection.
+- Added short-lived Enrollment Ed25519 grants bound to tenant, asset, device, issuance ID and CSR SHA-256.
+- Added idempotent device certificate issuance, persistent revocation, signed CRL and atomic certificate rotation.
+- Added Identity + Tenant scoped certificate administration.
+- Added transactional outbox for `pki.certificate.issued`, `pki.certificate.rotated` and `pki.certificate.revoked`.
+- Added Prometheus metrics, request IDs and secret-safe HTTP logging.
+- Added non-root Docker image and Compose services for DB init, CA init, migration, API and outbox worker.
+
+### PKI Security
+- Root private key is mounted only into `pki-ca-init`.
+- Runtime PKI API mounts only the online Intermediate material read-only.
+- PKI outbox worker mounts no CA material.
+- Enrollment signing private key is not available to PKI runtime.
+- Certificate rotation rejects reuse of the previous endpoint key.
+
+### PKI Verification
+- PKI unit/integration suite and compile: success.
+- Alembic `upgrade -> downgrade -> upgrade`: success.
+- Docker build and non-root UID check: success.
+- Base Compose and PKI smoke overlay validation: success.
+- Clean-stack PKI smoke: success.
+- Smoke verified issuance -> revocation -> CRL -> JetStream.
+- Smoke verified Root key and Enrollment signer isolation.
+- Smoke verified CA initialization idempotence and clean volume teardown.
+
+### Enrollment Service
+- Development gate opened after PKI certification.
+- Target flow: `token -> validate tenant/asset -> reserve one-time token -> CSR -> PKI grant -> certificate -> device.enrolled`.
+- Replay policy: identical retries are idempotent; mismatched reuse is rejected.
+
 ## [0.3.0-rc.1] - 2026-08-24
 
 ### Added
