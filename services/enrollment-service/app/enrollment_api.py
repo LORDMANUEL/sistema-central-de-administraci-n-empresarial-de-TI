@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .csr import validate_csr
 from .database import get_db
 from .errors import GuardianError
+from .metrics import ENROLLMENT_FAILURE, ENROLLMENT_SUCCESS
 from .models import DeviceEnrollment, EnrollmentStatus, EnrollmentToken, OutboxEvent
 from .reservation import EnrollmentRequestData, reserve_or_resume
 from .schemas import EnrollDeviceRequest, EnrollmentResult
@@ -62,6 +63,7 @@ def _persist_pki_failure(
     )
     if enrollment is None or token is None:
         session.rollback()
+        ENROLLMENT_FAILURE.inc()
         return
 
     enrollment.failure_code = error.code
@@ -88,11 +90,10 @@ def _persist_pki_failure(
             )
         )
     else:
-        # Network/5xx uncertainty and issuance conflicts keep the reservation
-        # and stable IDs. Retrying with the same request cannot roll identity.
         enrollment.status = EnrollmentStatus.PENDING
 
     session.commit()
+    ENROLLMENT_FAILURE.inc()
 
 
 @router.post("/enrollments", response_model=EnrollmentResult, status_code=status.HTTP_201_CREATED)
@@ -205,6 +206,7 @@ def enroll_device(
         )
     )
     session.commit()
+    ENROLLMENT_SUCCESS.inc()
     session.refresh(enrollment)
     if resumed:
         response.status_code = status.HTTP_200_OK
