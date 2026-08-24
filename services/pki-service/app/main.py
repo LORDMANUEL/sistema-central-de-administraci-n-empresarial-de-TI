@@ -6,9 +6,11 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from fastapi import FastAPI
 
+from .api import router
 from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
 from .errors import GuardianError, guardian_error_handler, request_id_middleware
+from .grants import EnrollmentGrantVerifier
 
 
 def _signer_ready(cert_path: str, key_path: str) -> None:
@@ -53,8 +55,11 @@ def create_app(
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = session_factory
+    app.state.root_cert_path = settings.root_cert_path
+    app.state.grant_verifier = EnrollmentGrantVerifier(settings)
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
+    app.include_router(router)
 
     @app.get("/health/live")
     def health_live() -> dict[str, str]:
