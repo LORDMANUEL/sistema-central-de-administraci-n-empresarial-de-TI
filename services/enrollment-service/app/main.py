@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+from fastapi import FastAPI
+
+from .config import Settings, get_settings
+from .database import build_engine, build_session_factory, database_ready
+from .errors import GuardianError, guardian_error_handler, request_id_middleware
+from .signing import EnrollmentGrantSigner
+
+
+def create_app(*, database_url: str | None = None, signing_key: str | None = None) -> FastAPI:
+    base = get_settings()
+    settings = Settings(
+        **{
+            **base.model_dump(),
+            **({"database_url": database_url} if database_url is not None else {}),
+            **({"signing_key": signing_key} if signing_key is not None else {}),
+        }
+    )
+    engine = build_engine(settings.database_url)
+    session_factory = build_session_factory(engine)
+
+    signer = None
+    signer_error = None
+    try:
+        signer = EnrollmentGrantSigner(settings)
+    except GuardianError as exc:
+        signer_error = exc
+
+    app = FastAPI(title="IT Guardian Enrollment Service", version="0.4.0-dev.1")
+    app.state.settings = settings
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.signer = signer
+    app.state.signer_error = signer_error
+    app.middleware("http")(request_id_middleware)
+    app.add_exception_handler(GuardianError, guardian_error_handler)
+
+    @app.get("/health/live")
+    def health_live() -> dict[str, str]:
+        return {"status": "ok", "service": settings.service_name}
+
+    @app.get("/health/ready")
+    def health_ready() -> dict[str, str]:
+        try:
+            database_ready(engine)
+        except Exception as exc:
+            raise GuardianError(503, "enrollment.database_unavailable", "Enrollment database is unavailable") from exc
+        if app.state.signer is None:
+            raise GuardianError(503, "enrollment.signer_unavailable", "Enrollment signing material is unavailable")
+        return {"status": "ready", "service": settings.service_name}
+
+    @app.get("/.well-known/jwks.json")
+    def jwks() -> dict:
+        if app.state.signer is None:
+            raise GuardianError(503, "enrollment.signer_unavailable", "Enrollment signing material is unavailable")
+        return app.state.signer.jwks()
+
+    return app
+
+
+app = create_app()
