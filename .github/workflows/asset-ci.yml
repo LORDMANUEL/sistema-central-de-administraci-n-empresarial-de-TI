@@ -5,12 +5,16 @@ on:
     branches: [main, develop, "feature/**", "release/**"]
     paths:
       - "services/asset-service/**"
+      - "services/tenant-service/**"
+      - "tests/e2e/core_identity_tenant_asset.py"
       - ".github/workflows/asset-ci.yml"
       - "compose.yaml"
       - ".env.example"
   pull_request:
     paths:
       - "services/asset-service/**"
+      - "services/tenant-service/**"
+      - "tests/e2e/core_identity_tenant_asset.py"
       - ".github/workflows/asset-ci.yml"
       - "compose.yaml"
       - ".env.example"
@@ -61,3 +65,46 @@ jobs:
           POSTGRES_PASSWORD: ci-password-not-for-production
           IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
         run: docker compose config --quiet
+
+  core-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test, docker-build, compose-config]
+    env:
+      POSTGRES_PASSWORD: ci-password-not-for-production
+      IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+      GUARDIAN_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start clean stack
+        run: docker compose up -d --build
+      - name: Exercise Identity to Tenant to Asset
+        run: python tests/e2e/core_identity_tenant_asset.py
+      - name: Verify asset.created reached JetStream
+        run: |
+          docker compose exec -T asset-service python - <<'PY'
+          import asyncio
+          import json
+          import nats
+
+          async def main():
+              nc = await nats.connect("nats://nats:4222")
+              js = nc.jetstream()
+              sub = await js.pull_subscribe("guardian.asset.created")
+              messages = await sub.fetch(1, timeout=15)
+              assert messages, "No guardian.asset.created event found"
+              event = json.loads(messages[0].data)
+              assert event["event_type"] == "asset.created", event
+              assert event["payload"]["tenant_id"], event
+              await nc.drain()
+
+          asyncio.run(main())
+          PY
+      - name: Dump stack state on failure
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=300
+      - name: Tear down clean stack
+        if: always()
+        run: docker compose down -v --remove-orphans
