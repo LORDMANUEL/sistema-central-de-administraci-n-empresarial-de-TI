@@ -12,8 +12,8 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 |---|---|---|
 | v0.1.0 | Foundation + Identity | ✅ DONE / main |
 | v0.2.0 | Tenant | ✅ DONE / main |
-| v0.3.0 | Asset Service | 🟠 RC — funcional + E2E verde; pendiente promoción a `main` |
-| v0.4.0 | Enrollment + PKI | ⬜ BLOQUEADO hasta promover v0.3.0 |
+| v0.3.0 | Asset Service | 🟠 RC CERTIFICADO — PR #3 listo; merge a `main` pendiente |
+| v0.4.0 | Enrollment + PKI | 🟡 DESARROLLO APILADO permitido; promoción bloqueada por merge v0.3 |
 | v0.5.0 | Gateway + Audit | ⬜ PENDIENTE |
 | v0.6.0 | Agent Control + Command + Telemetry | ⬜ PENDIENTE |
 | v0.7.0 | Windows Agent Modern | ⬜ PENDIENTE |
@@ -54,9 +54,8 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 - [x] E2E `Identity -> Tenant -> Asset`.
 - [x] E2E `Asset -> Outbox -> NATS JetStream`.
 - [x] Instalación limpia del stack en CI con `docker compose up -d --build` y teardown completo.
-- [x] CI de código y E2E verde sobre el candidato funcional previo a documentación final.
-- [ ] CI final verde sobre el SHA RC documentado.
-- [ ] PR #3 listo para review.
+- [x] CI final verde sobre el SHA RC de runtime `bd411ff593006c52b5a205867616e76d2c2043c3`.
+- [x] PR #3 listo para review.
 - [ ] Merge a `main`.
 - [ ] Marcar v0.3.0 DONE.
 
