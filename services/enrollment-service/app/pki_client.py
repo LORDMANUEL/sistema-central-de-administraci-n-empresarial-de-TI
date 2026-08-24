@@ -6,6 +6,7 @@ from datetime import datetime
 import httpx
 
 from .errors import GuardianError
+from .metrics import PKI_FAILURE, PKI_REQUESTS, PKI_SUCCESS
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ class PKIClient:
         headers = {"Authorization": f"Bearer {grant}"}
 
         for _attempt in range(self.retry_attempts):
+            PKI_REQUESTS.inc()
             try:
                 response = httpx.post(
                     f"{self.base_url}/api/v1/certificates/issue",
@@ -76,14 +78,22 @@ class PKIClient:
                 continue
 
             if response.status_code in (200, 201):
-                return self._parse_success(response, request_body)
+                try:
+                    result = self._parse_success(response, request_body)
+                except GuardianError:
+                    PKI_FAILURE.inc()
+                    raise
+                PKI_SUCCESS.inc()
+                return result
             if response.status_code == 409:
+                PKI_FAILURE.inc()
                 raise GuardianError(
                     409,
                     "enrollment.pki_issuance_conflict",
                     "PKI issuance ID conflicts with existing certificate data",
                 )
             if 400 <= response.status_code < 500:
+                PKI_FAILURE.inc()
                 raise GuardianError(
                     422,
                     "enrollment.pki_rejected",
@@ -92,12 +102,14 @@ class PKIClient:
             if response.status_code >= 500:
                 continue
 
+            PKI_FAILURE.inc()
             raise GuardianError(
                 503,
                 "enrollment.pki_unavailable",
                 "PKI Service returned an unexpected response",
             )
 
+        PKI_FAILURE.inc()
         raise GuardianError(
             503,
             "enrollment.pki_unavailable",
