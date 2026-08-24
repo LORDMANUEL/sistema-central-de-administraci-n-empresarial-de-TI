@@ -125,6 +125,82 @@ services:
     healthcheck:
       disable: true
 
+  asset-db-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-guardian}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      TARGET_DB: ${ASSET_DB:-guardian_asset}
+    command:
+      - sh
+      - -ec
+      - |
+        case "$$TARGET_DB" in ''|*[!A-Za-z0-9_]*) echo "Invalid TARGET_DB" >&2; exit 2;; esac
+        exists="$$(psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$TARGET_DB'")"
+        if [ "$$exists" != "1" ]; then createdb "$$TARGET_DB"; fi
+
+  asset-migrate:
+    build:
+      context: ./services/asset-service
+    restart: "no"
+    depends_on:
+      asset-db-init:
+        condition: service_completed_successfully
+    environment:
+      ASSET_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      ASSET_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${ASSET_DB:-guardian_asset}
+    command: ["alembic", "upgrade", "head"]
+    healthcheck:
+      disable: true
+
+  asset-service:
+    build:
+      context: ./services/asset-service
+    restart: unless-stopped
+    depends_on:
+      asset-migrate:
+        condition: service_completed_successfully
+      identity-service:
+        condition: service_healthy
+    environment:
+      ASSET_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      ASSET_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${ASSET_DB:-guardian_asset}
+      ASSET_IDENTITY_JWKS_URL: http://identity-service:8000/.well-known/jwks.json
+      ASSET_IDENTITY_ISSUER: ${IDENTITY_JWT_ISSUER:-urn:it-guardian:identity}
+      ASSET_IDENTITY_AUDIENCE: ${IDENTITY_JWT_AUDIENCE:-it-guardian-services}
+      ASSET_NATS_URL: nats://nats:4222
+      ASSET_NATS_STREAM: GUARDIAN_EVENTS
+    ports:
+      - "127.0.0.1:${ASSET_PORT:-8003}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  asset-outbox-worker:
+    build:
+      context: ./services/asset-service
+    restart: unless-stopped
+    depends_on:
+      asset-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    environment:
+      ASSET_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      ASSET_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${ASSET_DB:-guardian_asset}
+      ASSET_NATS_URL: nats://nats:4222
+      ASSET_NATS_STREAM: GUARDIAN_EVENTS
+    command: ["python", "-m", "app.outbox_worker"]
+    healthcheck:
+      disable: true
+
 volumes:
   guardian-postgres:
   guardian-nats:

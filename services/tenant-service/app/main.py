@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import models as _models  # noqa: F401
+from .access_api import router as access_router
 from .api import router
 from .auth import AccessTokenVerifier
 from .config import Settings, get_settings
@@ -19,6 +20,7 @@ from .errors import (
 )
 from .logging import install_http_logging
 from .metrics import install_metrics
+from .reference_api import router as reference_router
 
 
 def create_app(
@@ -52,6 +54,8 @@ def create_app(
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_error_handler)
     app.include_router(router)
+    app.include_router(access_router)
+    app.include_router(reference_router)
 
     @app.get("/health/live")
     def health_live() -> dict[str, str]:
