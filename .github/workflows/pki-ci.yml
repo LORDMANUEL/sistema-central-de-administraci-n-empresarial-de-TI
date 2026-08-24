@@ -36,3 +36,11 @@ jobs:
       - name: Test
         working-directory: services/pki-service
         run: python -m pytest -q
+      - name: Migration round-trip
+        working-directory: services/pki-service
+        env:
+          PKI_DATABASE_URL: sqlite+pysqlite:///./ci-pki-migration.db
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
