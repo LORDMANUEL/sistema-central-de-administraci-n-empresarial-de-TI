@@ -21,6 +21,7 @@ _bearer = HTTPBearer(auto_error=False)
 class IdentityPrincipal:
     user_id: str
     role: str
+    bearer_token: str = ""
 
 
 class AccessTokenVerifier:
@@ -80,7 +81,11 @@ class AccessTokenVerifier:
 
         if claims.get("type") != "access":
             raise GuardianError(401, "asset.invalid_token_type", "Access token is required")
-        return IdentityPrincipal(user_id=str(claims["sub"]), role=str(claims["role"]))
+        return IdentityPrincipal(
+            user_id=str(claims["sub"]),
+            role=str(claims["role"]),
+            bearer_token=token,
+        )
 
 
 def current_principal(
@@ -88,7 +93,11 @@ def current_principal(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> IdentityPrincipal:
     if getattr(request.app.state, "auth_disabled", False):
-        return IdentityPrincipal(user_id="test-platform-admin", role="platform_admin")
+        return getattr(
+            request.app.state,
+            "auth_disabled_principal",
+            IdentityPrincipal(user_id="test-platform-admin", role="platform_admin"),
+        )
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise GuardianError(401, "asset.authentication_required", "Authentication is required")
     return request.app.state.auth.verify(credentials.credentials)
