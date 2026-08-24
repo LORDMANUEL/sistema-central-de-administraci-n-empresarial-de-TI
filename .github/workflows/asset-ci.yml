@@ -94,8 +94,9 @@ jobs:
               messages = await sub.fetch(1, timeout=15)
               assert messages, "No guardian.asset.created event found"
               event = json.loads(messages[0].data)
-              assert event["event_type"] == "asset.created", event
-              assert event["payload"]["tenant_id"], event
+              assert event["schema_version"] == 1, event
+              assert event["type"] == "asset.created", event
+              assert event["data"]["tenant_id"], event
               await nc.drain()
 
           asyncio.run(main())
