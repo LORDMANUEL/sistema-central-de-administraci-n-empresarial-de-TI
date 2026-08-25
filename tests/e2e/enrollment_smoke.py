@@ -217,7 +217,7 @@ def main() -> None:
         assert first["asset_id"] == asset_id
         assert "private_key" not in first
         assert "grant" not in first
-        verify_certificate(first["certificate_pem"], "ci-enroll-ws-001", directory)
+        verify_certificate(first["certificate_pem"], "CI-ENROLL-WS-001", directory)
 
         csr_two = generate_csr(directory, "ci-enroll-ws-002")
         replay_status, replay = request(
