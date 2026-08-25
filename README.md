@@ -6,12 +6,12 @@ IT Guardian unifica identidad, tenancy, inventario de activos, enrollment seguro
 
 ## Estado
 
-**Versión candidata:** `0.4.0`  
-**Rama de release:** `feature/v0.4.0-pki-enrollment-main`  
-**Core certificado:** Identity + Tenant + Asset + PKI + Enrollment  
+**Versión estable:** `0.4.0`  
+**Rama estable:** `main`  
+**Core estable:** Identity + Tenant + Asset + PKI + Enrollment  
 **Siguiente hito:** `v0.5.0 — Gateway + Audit`
 
-La rama `main` es la línea estable. Un módulo solo se promueve después de pruebas, migraciones, Docker, Compose e integración E2E sobre una instalación limpia.
+`v0.4.0` fue certificado mediante CI simultáneo de los cinco servicios, instalación desde volúmenes vacíos, E2E de Enrollment/PKI, JetStream, verificación X.509, aislamiento de claves y teardown completo. Un módulo solo se promueve a `main` después de pruebas, migraciones, Docker, Compose e integración E2E reproducible.
 
 ## Core disponible en v0.4.0
 
@@ -166,7 +166,7 @@ token CONSUMED + device ENROLLED + JetStream
 Cada dominio usa su propia base PostgreSQL.
 ```
 
-En `v0.5.0`, Gateway será el borde HTTP controlado y Audit agregará la bitácora inmutable; ninguno reemplazará la autorización propia de los servicios.
+En `v0.5.0`, Gateway será el borde HTTP controlado y Audit agregará la bitácora inmutable/tamper-evident; ninguno reemplazará la autorización propia de los servicios.
 
 ## Documentación
 
