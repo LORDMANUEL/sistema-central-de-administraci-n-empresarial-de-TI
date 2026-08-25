@@ -72,11 +72,13 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci-password-not-for-production
           IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+          ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
         run: docker compose config --quiet
       - name: Validate PKI smoke overlay
         env:
           POSTGRES_PASSWORD: ci-password-not-for-production
           IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+          ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
         run: docker compose -f compose.yaml -f tests/e2e/compose.pki-smoke.yaml --profile smoke config --quiet
 
   pki-smoke:
@@ -86,6 +88,7 @@ jobs:
     env:
       POSTGRES_PASSWORD: ci-password-not-for-production
       IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+      ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
       GUARDIAN_ENV: production
     steps:
       - uses: actions/checkout@v4
