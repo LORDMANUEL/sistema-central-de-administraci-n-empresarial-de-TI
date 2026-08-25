@@ -2,6 +2,87 @@
 
 All notable IT Guardian changes are documented here.
 
+## [0.4.0] - 2026-08-24
+
+### Core release
+- Certified PKI + Enrollment as the v0.4 end-to-end capability.
+- Added independent `guardian_pki` and `guardian_enrollment` databases with Alembic round-trips.
+- Added full Compose deployment for Enrollment DB init, migration, API on port 8005 and outbox worker.
+- Added a clean-stack E2E from Identity bootstrap through Tenant/Asset, one-time Enrollment token, endpoint CSR, PKI issuance, X.509 verification and JetStream `device.enrolled`.
+
+### Enrollment
+- One-time high-entropy tokens are bound to tenant + asset and persisted only as SHA-256 hash plus a non-secret hint.
+- The plaintext token is returned only at creation and never appears in inventory/events.
+- Atomic reservation creates stable `device_id` + `issuance_id` before the PKI network call.
+- Identical retries reuse the same enrollment/certificate; mismatched token reuse is rejected as replay.
+- CSR validation accepts RSA >=2048 and EC P-256/P-384 while endpoint private keys remain local.
+- Added a dedicated Enrollment Ed25519 signer and public JWKS for short-lived PKI grants.
+- Added safe PKI retry/recovery semantics: transient failure and issuance conflict preserve identity; correctable rejection can release the token only before a certificate exists.
+- Added administrative token and enrollment inventory with Identity/Tenant authorization and Asset validation through APIs only.
+- Added transactional outbox events `enrollment.token.created`, `enrollment.token.revoked`, `device.enrolled` and `device.enrollment.failed`.
+- Added Prometheus metrics, request IDs and secret-safe HTTP logging.
+
+### PKI
+- Guardian Root CA RSA-4096 + Device Intermediate RSA-3072 with fail-safe idempotent initialization.
+- Root private key is available only to `pki-ca-init`; runtime API mounts only Intermediate material read-only.
+- Added idempotent device certificate issuance by `issuance_id`, persistent revocation, signed CRL and atomic certificate rotation.
+- Added Enrollment Ed25519 grant verification bound to tenant, asset, device, issuance ID and CSR SHA-256.
+- Added transactional outbox for PKI certificate events and JetStream delivery.
+
+### Security verification
+- Enrollment API is non-root; Enrollment worker does not receive `ENROLLMENT_SIGNING_KEY`.
+- Enrollment API/worker mount no PKI Root or Intermediate material.
+- PKI API/worker do not receive Enrollment private signer material.
+- PKI runtime has no Root private key; PKI outbox worker has no CA material.
+- Device private keys never cross Enrollment or PKI APIs.
+- Clean-stack replay check returns 409 for a different CSR after token consumption.
+- Clean-stack identical retry returns the same device/certificate without duplicate issuance.
+
+### CI certification
+- Identity Service CI: success.
+- Tenant Service CI: success.
+- Asset Service tests, migration, Docker/Compose and core E2E: success.
+- Enrollment tests, migration, Docker non-root, Compose and clean-stack smoke: success.
+- PKI tests, migration, Docker non-root, Compose overlay and clean-stack smoke: success.
+- Enrollment smoke verified `device.enrolled` in JetStream, signer/CA isolation and clean volume teardown.
+- PKI smoke verified issuance -> revocation -> CRL -> JetStream, Root/signer isolation, CA init idempotence and clean volume teardown.
+
+## [0.4.0-dev.1] - 2026-08-24
+
+### PKI Service
+- Added isolated `guardian_pki` database and Alembic migration.
+- Added Guardian Root CA RSA-4096 and Device Intermediate CA RSA-3072 with idempotent fail-safe initialization.
+- Device private keys remain on endpoints; PKI accepts signed CSR requests only.
+- Added RSA >=2048, EC P-256 and EC P-384 CSR support with weak/unsupported key rejection.
+- Added short-lived Enrollment Ed25519 grants bound to tenant, asset, device, issuance ID and CSR SHA-256.
+- Added idempotent device certificate issuance, persistent revocation, signed CRL and atomic certificate rotation.
+- Added Identity + Tenant scoped certificate administration.
+- Added transactional outbox for `pki.certificate.issued`, `pki.certificate.rotated` and `pki.certificate.revoked`.
+- Added Prometheus metrics, request IDs and secret-safe HTTP logging.
+- Added non-root Docker image and Compose services for DB init, CA init, migration, API and outbox worker.
+
+### PKI Security
+- Root private key is mounted only into `pki-ca-init`.
+- Runtime PKI API mounts only the online Intermediate material read-only.
+- PKI outbox worker mounts no CA material.
+- Enrollment signing private key is not available to PKI runtime.
+- Certificate rotation rejects reuse of the previous endpoint key.
+
+### PKI Verification
+- PKI unit/integration suite and compile: success.
+- Alembic `upgrade -> downgrade -> upgrade`: success.
+- Docker build and non-root UID check: success.
+- Base Compose and PKI smoke overlay validation: success.
+- Clean-stack PKI smoke: success.
+- Smoke verified issuance -> revocation -> CRL -> JetStream.
+- Smoke verified Root key and Enrollment signer isolation.
+- Smoke verified CA initialization idempotence and clean volume teardown.
+
+### Enrollment Service
+- Development gate opened after PKI certification.
+- Target flow: `token -> validate tenant/asset -> reserve one-time token -> CSR -> PKI grant -> certificate -> device.enrolled`.
+- Replay policy: identical retries are idempotent; mismatched reuse is rejected.
+
 ## [0.3.0-rc.1] - 2026-08-24
 
 ### Added

@@ -4,7 +4,7 @@
 **Nombre de producto:** IT Guardian  
 **Repositorio:** LORDMANUEL/sistema-central-de-administraci-n-empresarial-de-TI  
 **Arquitectura:** Microservicios desde v0.1.0  
-**Versión de trabajo:** 0.1.0-foundation  
+**Versión de trabajo:** v0.4.0 certificada; siguiente v0.5.0 Gateway + Audit  
 **Objetivo de estabilidad:** v1.0.0 Enterprise Stable
 
 ## 1. Propósito
@@ -25,6 +25,8 @@ La plataforma administra personas, identidades, sedes y activos: PCs, servidores
 8. Una UX única. Los motores OSS son backends sustituibles, no la interfaz final del producto.
 9. Rendimiento: feedback visual inmediato, caches y materialización de vistas; el navegador no consulta múltiples motores externos para pintar cada pantalla.
 10. Versionado SemVer y changelog verificable.
+11. Zero-trust entre servicios: Gateway puede validar en el borde, pero no sustituye autenticación/autorización de cada dominio.
+12. Secret safety por allowlist: bearer, passwords, enrollment tokens, CSR y private keys no deben entrar a logs/eventos/audit metadata.
 
 ## 3. Plataformas objetivo
 
@@ -59,7 +61,10 @@ IT Guardian diferencia explícitamente `imei/imei2`, `iccid`, `eid`, `msisdn`, `
 Web React/TS ─┐
 Tauri Desktop ├─> API Gateway ─> Identity/Auth
 Help Client ──┘       │
+                      ├─> Tenant Service
                       ├─> Asset Service
+                      ├─> Enrollment Service ─> PKI Service
+                      ├─> Audit Service
                       ├─> Device/Agent Control
                       ├─> Ticket Service
                       ├─> Policy Service
@@ -68,7 +73,7 @@ Help Client ──┘       │
                       ├─> Backup
                       ├─> Network/WiFi/VPN/Printer
                       ├─> Mobile/MDM/Location
-                      ├─> Automation/Notification/Audit
+                      ├─> Automation/Notification
                       └─> Integration adapters
 
 Services <──> NATS JetStream <──> Workers
@@ -84,12 +89,12 @@ Cache ──────> Redis/Valkey cuando el dominio lo necesite
 2. `identity-service`: usuarios, roles, permisos, credenciales, MFA, sesiones y tokens.
 3. `tenant-service`: organizaciones, sedes, departamentos y configuración de tenancy.
 4. `asset-service`: modelo canónico de activos y correlación de IDs externos.
-5. `enrollment-service`: tokens de alta, aprobación y bootstrap de dispositivos.
-6. `pki-service`: certificados de dispositivo, rotación y revocación.
+5. `enrollment-service`: tokens de alta, reserva idempotente, CSR y bootstrap de dispositivos.
+6. `pki-service`: certificados de dispositivo, rotación, revocación y CRL.
 7. `agent-control-service`: heartbeat, capacidades, comandos y resultados.
 8. `telemetry-service`: ingestión de métricas, normalización y retención.
 9. `command-service`: jobs remotos, idempotencia, colas y estado.
-10. `audit-service`: registro inmutable de acciones administrativas y eventos sensibles.
+10. `audit-service`: registro inmutable/tamper-evident de acciones administrativas y eventos sensibles.
 
 ### Operaciones endpoint
 11. `software-service`: inventario, catálogo, instalación/desinstalación y versiones.
@@ -132,7 +137,7 @@ Cache ──────> Redis/Valkey cuando el dominio lo necesite
 Tactical RMM, MeshCentral, Wazuh, Velociraptor, GLPI, Zabbix, NetBox, NetBird, FreeRADIUS, Greenbone/OpenVAS, UrBackup/Restic y OpenBao. Cada integración vive detrás de una interfaz interna y nunca expone sus credenciales al frontend.
 
 ## 7. Eventos canónicos iniciales
-`identity.user.created`, `identity.user.disabled`, `device.enrolled`, `device.online`, `device.offline`, `inventory.updated`, `policy.violation`, `software.install.requested`, `software.install.completed`, `patch.required`, `backup.failed`, `usb.blocked`, `security.alert.created`, `vulnerability.detected`, `ticket.created`, `ticket.sla.at_risk`, `location.updated`, `integration.health.changed`.
+`identity.user.created`, `identity.user.disabled`, `asset.created`, `enrollment.token.created`, `device.enrolled`, `device.enrollment.failed`, `pki.certificate.issued`, `pki.certificate.rotated`, `pki.certificate.revoked`, `device.online`, `device.offline`, `inventory.updated`, `policy.violation`, `software.install.requested`, `software.install.completed`, `patch.required`, `backup.failed`, `usb.blocked`, `security.alert.created`, `vulnerability.detected`, `ticket.created`, `ticket.sla.at_risk`, `location.updated`, `integration.health.changed`.
 
 ## 8. UX y navegación
 Overview; Assets (Computers, Servers, Mobile, Printers, Network, Virtualization); Operations (Software, Patching, Remote Support, Backup, USB); Security (Alerts, Vulnerabilities, Forensics, Compliance); Network (Topology, Wi-Fi, VPN, IPAM/DCIM); Service Desk (Tickets, SLA, Requests); Identity; Automation; Reports; Audit; Integrations; Settings.
@@ -148,22 +153,40 @@ Las políticas críticas se materializan localmente. La pérdida de sincronizaci
 ## 11. Seguridad y privacidad
 MFA para roles privilegiados en producción; RBAC/ABAC; secretos en OpenBao o equivalente; certificados de dispositivo; logs append-only; ubicación/soporte sujetos a permisos y políticas; cifrado en tránsito y reposo; backups 3-2-1-1-0.
 
-## 12. Definición de DONE por microservicio
-Contrato API, tests, migraciones, Docker, `/health/live`, `/health/ready`, métricas/logs, validación/errores, authz, documentación, CI, threat notes y cero mocks/endpoints vacíos usados como producción.
+PKI/Enrollment agregan estas invariantes:
+- private keys de endpoints permanecen en el dispositivo;
+- Root CA no está disponible al runtime API;
+- Enrollment signer no está disponible a PKI ni a workers;
+- tokens de alta se almacenan solo como hash;
+- retries de emisión conservan identidad/`issuance_id` y replay distinto se rechaza.
 
-## 13. Versionado
-- `v0.1.0`: Foundation + Identity.
-- `v0.2.0`: Tenant + Asset + Enrollment/PKI.
-- `v0.3.0`: Agent Control + Windows/Linux agent MVP.
-- `v0.4.0`: Ticket Service + Help Client + GLPI adapter.
-- `v0.5.0`: Tactical/Mesh + software/patching.
-- `v0.6.0`: Wazuh + security/compliance/USB.
-- `v0.7.0`: Servers + Zabbix + site collector + printers.
-- `v0.8.0`: Backup + restore verification.
-- `v0.9.0`: Network + Wi-Fi + VPN + NetBox/FreeRADIUS/NetBird.
-- `v0.10.0`: Android/iOS MDM + mobile/location.
-- `v0.11.0`: Velociraptor/OpenVAS + DFIR/vulnerability.
-- `v0.12.0`: Automation + reports + licensing + hardening.
+## 12. Definición de DONE por microservicio
+Contrato API, tests, migraciones, Docker no-root, `/health/live`, `/health/ready`, métricas/logs, validación/errores, authz, documentación, CI, threat notes, E2E limpio cuando aplique y cero mocks/endpoints vacíos usados como producción.
+
+## 13. Versionado vigente
+
+El roadmap operativo canónico es `ROADMAP.md`. Esta secuencia reemplaza la tabla temprana de Foundation:
+
+- `v0.1.0`: Foundation + Identity — DONE.
+- `v0.2.0`: Tenant — DONE.
+- `v0.3.0`: Asset Service — DONE.
+- `v0.4.0`: PKI + Enrollment — CERTIFICADO.
+- `v0.5.0`: Gateway + Audit — siguiente.
+- `v0.6.0`: Agent Control + Command + Telemetry.
+- `v0.7.0`: Windows Agent Modern.
+- `v0.8.0`: Web Console MVP.
+- `v0.9.0`: Software + Patch + Policy.
+- `v0.10.0`: Tickets + Help Client.
+- `v0.11.0`: Remote Support.
+- `v0.12.0`: Security + Wazuh + USB.
+- `v0.13.0`: Linux + macOS Agents.
+- `v0.14.0`: Servers + Zabbix + Printers.
+- `v0.15.0`: Backup.
+- `v0.16.0`: Network + Wi-Fi + VPN.
+- `v0.17.0`: Android/iOS MDM + Location.
+- `v0.18.0`: DFIR + Vulnerability.
+- `v0.19.0`: Automation + Reports + Licensing.
+- `v0.20.0-rc`: Release Candidate integral.
 - `v1.0.0`: Enterprise Stable.
 
 Legacy (Windows 7, Lion, Symbian, KaiOS, HarmonyOS específico) usa matriz de capacidades y no retrasa indefinidamente la estabilidad del núcleo moderno.

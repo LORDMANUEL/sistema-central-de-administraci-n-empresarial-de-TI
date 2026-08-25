@@ -2,76 +2,108 @@
 
 Sistema Central de Administración Empresarial de TI, self-hosted y multiplataforma.
 
-IT Guardian unifica endpoints, servidores, móviles, impresoras, red, seguridad, soporte remoto, backups, VPN, Wi-Fi, políticas, inventario, tickets, auditoría y automatización sobre una arquitectura de microservicios.
+IT Guardian unifica identidad, tenancy, inventario de activos, enrollment seguro, PKI de dispositivos y, progresivamente, control de agentes, telemetría, soporte, seguridad, red, backup, tickets, automatización y auditoría sobre una arquitectura de microservicios.
 
 ## Estado
 
-**Rama activa:** `feature/v0.2.0-tenant`  
-**Versión:** `0.2.0-dev.1`  
-**Servicios terminados en la rama:** Identity Service + Tenant Service
+**Versión candidata:** `0.4.0`  
+**Rama de release:** `feature/v0.4.0-pki-enrollment-main`  
+**Core certificado:** Identity + Tenant + Asset + PKI + Enrollment  
+**Siguiente hito:** `v0.5.0 — Gateway + Audit`
 
-La rama `main` se conserva como línea estable. Los módulos se terminan, prueban y documentan antes de promoverse.
+La rama `main` es la línea estable. Un módulo solo se promueve después de pruebas, migraciones, Docker, Compose e integración E2E sobre una instalación limpia.
 
-## Documentación principal
+## Core disponible en v0.4.0
 
-- `MASTER.md`: visión, módulos, submódulos, integraciones, plataformas, versiones y Definition of Done.
-- `docs/superpowers/specs/2026-08-21-it-guardian-platform-design.md`: decisión arquitectónica.
-- `docs/superpowers/plans/2026-08-21-v0.1.0-foundation-identity.md`: plan ejecutable de v0.1.0.
-- `services/identity-service/README.md`: uso del primer microservicio.
+### Identity Service — :8001
 
-## v0.1.0 Foundation
-
-Incluye el primer corte de Identity Service:
-
-- bootstrap único y transaccional del `platform_admin`;
+- bootstrap único de `platform_admin`;
 - Argon2;
-- JWT access/refresh tipados;
-- RBAC inicial;
-- alta/listado/activación de usuarios;
-- errores normalizados con `request_id`;
-- health/readiness;
-- métricas Prometheus;
-- logs HTTP JSON;
-- migración Alembic;
-- PostgreSQL + Docker Compose;
-- CI con tests y smoke test de migraciones.
+- access/refresh JWT Ed25519;
+- JWKS público;
+- RBAC base;
+- health/readiness, métricas y logs estructurados.
 
-## v0.2.0 Tenant Service
+### Tenant Service — :8002
 
-La rama v0.2 añade el límite empresarial que usarán todos los activos posteriores:
-
-- empresas/tenants y suspensión;
+- empresas/tenants;
 - membresías y roles por tenant;
-- sedes con ubicación;
-- departamentos jerárquicos con protección de ciclos;
-- validación de JWT por JWKS, sin compartir la clave privada de Identity;
-- outbox transaccional + NATS JetStream;
-- API y worker separados;
-- BD `guardian_tenant` independiente de `guardian_identity`.
+- sedes y departamentos jerárquicos;
+- autorización tenant-scoped;
+- transactional outbox + NATS JetStream;
+- BD `guardian_tenant` independiente.
+
+### Asset Service — :8003
+
+- modelo canónico de activos;
+- `guardian_asset_id` estable;
+- correlación con IDs externos;
+- validación de tenant/site/department por API;
+- outbox resiliente + JetStream;
+- E2E `Identity -> Tenant -> Asset`.
+
+### PKI Service — :8004
+
+- Root CA RSA-4096 + Device Intermediate RSA-3072;
+- Root private key aislada del runtime;
+- CSR RSA >=2048 / EC P-256/P-384;
+- emisión idempotente por `issuance_id`;
+- revocación, CRL y rotación;
+- grants Enrollment Ed25519 de corta duración;
+- Docker no-root y CA online read-only;
+- clean-stack smoke de emisión, revocación, CRL y JetStream.
+
+### Enrollment Service — :8005
+
+- tokens one-time de alta entropía ligados a tenant + asset;
+- plaintext entregado una sola vez y solo hash persistido;
+- reserva atómica con `device_id` + `issuance_id` estables;
+- retry idempotente y replay distinto rechazado;
+- CSR generado en endpoint; private key nunca cruza la API;
+- grant Ed25519 hacia PKI;
+- recuperación ante red/5xx y conflicto de issuance sin duplicar identidad;
+- `device.enrolled` y `device.enrollment.failed` mediante outbox;
+- inventario administrativo tenant-scoped sin secretos internos;
+- clean-stack E2E real `Identity -> Tenant -> Asset -> Enrollment -> PKI -> certificate -> JetStream`.
+
+## Seguridad de claves
+
+- `IDENTITY_SIGNING_KEY` solo pertenece a Identity.
+- `ENROLLMENT_SIGNING_KEY` solo pertenece al runtime API de Enrollment; su outbox worker no la recibe.
+- La Root CA solo se monta en `pki-ca-init`.
+- PKI runtime monta únicamente la Intermediate online en modo read-only.
+- Los workers PKI/Enrollment no montan material CA.
+- Las private keys de dispositivos se generan y permanecen en el endpoint.
 
 ## Arranque Docker
 
 1. Copie `.env.example` a `.env`.
-2. Reemplace `POSTGRES_PASSWORD` y genere una semilla Ed25519 privada de 32 bytes:
+2. Reemplace `POSTGRES_PASSWORD`.
+3. Genere **dos semillas Ed25519 diferentes** de 32 bytes:
 
 ```bash
-python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b'=') .decode())"
+python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b'=').decode())"
 ```
 
-Guarde el resultado en `IDENTITY_SIGNING_KEY`. La clave privada solo pertenece a Identity; los demás microservicios validarán tokens mediante `/.well-known/jwks.json`.
-3. Ejecute:
+Use una en `IDENTITY_SIGNING_KEY` y genere otra distinta para `ENROLLMENT_SIGNING_KEY`.
+
+4. Inicie el stack:
 
 ```bash
 docker compose up --build -d
 ```
 
-4. Compruebe:
+5. Compruebe los servicios:
 
 ```bash
 curl http://localhost:8001/health/ready
+curl http://localhost:8002/health/ready
+curl http://localhost:8003/health/ready
+curl http://localhost:8004/health/ready
+curl http://localhost:8005/health/ready
 ```
 
-5. Cree el primer administrador una sola vez:
+6. Cree el primer administrador una sola vez:
 
 ```bash
 curl -X POST http://localhost:8001/api/v1/auth/bootstrap \
@@ -79,22 +111,71 @@ curl -X POST http://localhost:8001/api/v1/auth/bootstrap \
   -d '{"email":"admin@example.com","display_name":"Platform Admin","password":"use-a-long-unique-password"}'
 ```
 
-## Arquitectura
+## Flujo de alta de un endpoint
 
 ```text
-Web React/TypeScript + Tauri
-          │
-      API Gateway
-          │
- ┌────────┼─────────┐
-Identity Assets  Tickets ...
-          │
-   NATS JetStream
-          │
-Integraciones y agentes
+platform_admin/org_admin
+        |
+        v
+crear tenant/site/department/asset
+        |
+        v
+crear enrollment token (plaintext una sola vez)
+        |
+        v
+endpoint genera private key + CSR
+        |
+        v
+Enrollment reserva device_id + issuance_id
+        |
+        v
+Enrollment firma grant Ed25519
+        |
+        v
+PKI emite certificado cliente
+        |
+        v
+token CONSUMED + device ENROLLED + JetStream
 ```
 
-El servidor de producción recomendado es Linux + Docker. Windows y macOS podrán ejecutar el stack mediante Docker para laboratorio, edge pequeño y desarrollo.
+## Arquitectura actual
+
+```text
+                 ┌───────────────┐
+                 │ Identity 8001 │
+                 └───────┬───────┘
+                         │ JWKS
+                ┌────────▼────────┐
+                │ Tenant 8002     │
+                └────────┬────────┘
+                         │
+                ┌────────▼────────┐
+                │ Asset 8003      │
+                └────────┬────────┘
+                         │
+                ┌────────▼────────┐
+                │ Enrollment 8005 │── JWKS/grant ──┐
+                └────────┬────────┘                │
+                         │                         ▼
+                         │                  ┌──────────────┐
+                         └─────────────────>│ PKI 8004     │
+                                            └──────┬───────┘
+                                                   │
+                         NATS JetStream <──────────┘
+
+Cada dominio usa su propia base PostgreSQL.
+```
+
+En `v0.5.0`, Gateway será el borde HTTP controlado y Audit agregará la bitácora inmutable; ninguno reemplazará la autorización propia de los servicios.
+
+## Documentación
+
+- `MASTER.md`: arquitectura y reglas maestras.
+- `ROADMAP.md`: gates de versión y Definition of Done.
+- `CHANGELOG.md`: cambios verificables por release.
+- `services/*/README.md`: contratos operativos por microservicio.
+- `docs/superpowers/specs/`: especificaciones de arquitectura.
+- `docs/superpowers/plans/`: planes TDD ejecutables.
 
 ## Licencia
 
