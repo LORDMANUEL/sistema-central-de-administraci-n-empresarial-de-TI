@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .api import router as audit_router
 from .auth import IdentityAccessVerifier
 from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
@@ -33,6 +34,7 @@ def create_app(*, database_url: str | None = None) -> FastAPI:
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_error_handler)
+    app.include_router(audit_router)
 
     @app.get("/health/live")
     def health_live() -> dict[str, str]:
