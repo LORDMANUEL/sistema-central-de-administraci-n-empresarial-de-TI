@@ -13,8 +13,8 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 | v0.1.0 | Foundation + Identity | ✅ DONE / main |
 | v0.2.0 | Tenant | ✅ DONE / main |
 | v0.3.0 | Asset Service | ✅ DONE / main |
-| v0.4.0 | Enrollment + PKI | 🟢 CERTIFICADO — PR #6 listo para promoción a `main` |
-| v0.5.0 | Gateway + Audit | 🟡 SIGUIENTE — análisis/diseño tras merge v0.4 |
+| v0.4.0 | Enrollment + PKI | ✅ DONE / main — merge PR #6 |
+| v0.5.0 | Gateway + Audit | 🟡 EN DISEÑO — siguiente gate activo |
 | v0.6.0 | Agent Control + Command + Telemetry | ⬜ PENDIENTE |
 | v0.7.0 | Windows Agent Modern | ⬜ PENDIENTE |
 | v0.8.0 | Web Console MVP | ⬜ PENDIENTE |
@@ -47,7 +47,7 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 - [x] Instalación limpia y teardown completo en CI.
 - [x] PR #3 mergeado a `main` el 2026-08-24.
 
-## v0.4.0 PKI — CERTIFICADO
+## v0.4.0 PKI — DONE
 
 - [x] Root CA RSA-4096 + Device Intermediate RSA-3072.
 - [x] Inicialización idempotente y fail-safe; no sobreescribe CA inconsistente/parcial.
@@ -71,7 +71,7 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 - [x] Smoke verifica aislamiento Root key y Enrollment signer.
 - [x] Smoke verifica CA init idempotente y teardown de volúmenes.
 
-## v0.4.0 Enrollment — CERTIFICADO
+## v0.4.0 Enrollment — DONE
 
 Flujo certificado:
 
@@ -103,28 +103,35 @@ Flujo certificado:
 - [x] `device.enrolled` verificado en JetStream sin token/CSR.
 - [x] Aislamiento signer/CA verificado por `docker inspect`.
 - [x] Teardown completo de contenedores y volúmenes.
-- [x] Identity/Tenant/Asset/Enrollment/PKI CI verdes sobre el mismo SHA candidato.
-- [x] PR #6 técnicamente listo para promoción a `main`.
+- [x] Identity/Tenant/Asset/Enrollment/PKI CI verdes sobre el mismo SHA de release.
+- [x] PR #6 squash-mergeado a `main` como v0.4.0.
 
-## Siguiente gate — v0.5.0 Gateway + Audit
+## Gate activo — v0.5.0 Gateway + Audit
 
-Antes de implementar se debe cerrar especificación y threat model. El alcance no incluye todavía Agent Control/Command/Telemetry.
+El alcance de v0.5 está limitado a **borde HTTP seguro + auditoría inmutable/tamper-evident**. Agent Control, Command y Telemetry permanecen en v0.6.
 
 Objetivos mínimos:
 
-- [ ] Gateway como borde HTTP controlado con allowlist de rutas/servicios.
-- [ ] Propagación de `request_id` y contexto sin confiar en headers de identidad inyectables por cliente.
-- [ ] Validación JWT en el borde sin eliminar authn/authz de cada microservicio.
-- [ ] Límites de body/header, timeouts y rate limiting por ruta/actor/tenant.
-- [ ] Política explícita de retries: no repetir mutaciones no idempotentes.
+- [ ] Gateway como único borde HTTP norte para APIs de administración, con allowlist estática de rutas/métodos/upstreams.
+- [ ] Rutas internas de PKI/Enrollment no expuestas por Gateway.
+- [ ] Propagación de `request_id` sin confiar en headers de identidad inyectables por cliente.
+- [ ] Sanitización de `X-Guardian-*`, hop-by-hop y `X-Forwarded-*` no confiables.
+- [ ] Validación JWT temprana en el borde sin eliminar authn/authz de cada microservicio.
+- [ ] Modos de ruta explícitos: pública, bearer admin, endpoint enrollment e internal-only.
+- [ ] Límites de body/header, timeouts y rate limiting por clase de ruta/actor/IP/tenant.
+- [ ] Política de retries: cero retries automáticos para mutaciones; solo reads seguros bajo condiciones explícitas.
+- [ ] Gateway emite auditoría de mutaciones privilegiadas con `request_id` y metadata allowlisted, nunca bodies/secrets.
+- [ ] Mutaciones administrativas fail-closed si no se puede registrar el evento de auditoría previo.
 - [ ] Audit Service con BD `guardian_audit` propia y API solo lectura administrativa.
-- [ ] Ingesta idempotente de eventos de `GUARDIAN_EVENTS` por `event_id` único.
-- [ ] Registro de acciones de gateway que no generan eventos de dominio, incluidos rechazos relevantes.
-- [ ] Modelo append-only con evidencia de manipulación (`prev_hash`/`record_hash` o esquema equivalente validado).
-- [ ] Metadata de auditoría por allowlist; nunca bearer, password, enrollment token, CSR, private key ni signing seed.
-- [ ] `platform_admin` global y lectura tenant-scoped para `org_admin` activo.
-- [ ] Tests de aislamiento cross-tenant, dedupe, hash-chain/tamper y secret safety.
-- [ ] Docker no-root, migración round-trip, Compose y clean-stack E2E.
+- [ ] Ingesta durable/idempotente de eventos de `GUARDIAN_EVENTS` por `source_event_id` único.
+- [ ] Registro de acciones de Gateway que no generan evento de dominio, incluidos rechazos relevantes.
+- [ ] Modelo append-only con cadena hash particionada (`prev_hash`, `record_hash`, sequence/head).
+- [ ] Trigger/controles que impidan UPDATE/DELETE de registros auditables desde el rol normal de servicio.
+- [ ] Metadata de auditoría por adapters/allowlist; nunca bearer, password, enrollment token/hash, CSR, private key ni signing seed.
+- [ ] `platform_admin` global y lectura tenant-scoped para `org_admin` de tenant activo.
+- [ ] API de consulta con filtros + keyset pagination y endpoint de verificación de cadena.
+- [ ] Tests de aislamiento cross-tenant, dedupe/redelivery, tamper, SSRF/routing, header spoofing, rate limit y secret safety.
+- [ ] Docker no-root, Alembic round-trip, Compose y clean-stack E2E del core pasando por Gateway y consultando Audit.
 
 ## Definition of Done
 
