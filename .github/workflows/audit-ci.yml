@@ -5,12 +5,14 @@ on:
     branches: [main, develop, "feature/**", "release/**"]
     paths:
       - "services/audit-service/**"
+      - "tests/e2e/audit_smoke.py"
       - ".github/workflows/audit-ci.yml"
       - "compose.yaml"
       - ".env.example"
   pull_request:
     paths:
       - "services/audit-service/**"
+      - "tests/e2e/audit_smoke.py"
       - ".github/workflows/audit-ci.yml"
       - "compose.yaml"
       - ".env.example"
@@ -31,6 +33,16 @@ jobs:
       - name: Install
         working-directory: services/audit-service
         run: pip install -e '.[test]'
+      - name: Compile
+        run: python -m compileall services/audit-service/app
       - name: Test
         working-directory: services/audit-service
         run: python -m pytest -q
+      - name: Migration round-trip
+        working-directory: services/audit-service
+        env:
+          AUDIT_DATABASE_URL: sqlite+pysqlite:///./ci-audit-migration.db
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
