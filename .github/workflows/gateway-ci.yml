@@ -1,0 +1,40 @@
+name: Gateway Service CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "release/**"]
+    paths:
+      - "services/gateway-service/**"
+      - "tests/e2e/gateway_smoke.py"
+      - ".github/workflows/gateway-ci.yml"
+      - "compose.yaml"
+      - ".env.example"
+  pull_request:
+    paths:
+      - "services/gateway-service/**"
+      - "tests/e2e/gateway_smoke.py"
+      - ".github/workflows/gateway-ci.yml"
+      - "compose.yaml"
+      - ".env.example"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/gateway-service/pyproject.toml
+      - name: Install
+        working-directory: services/gateway-service
+        run: pip install -e '.[test]'
+      - name: Compile
+        run: python -m compileall services/gateway-service/app
+      - name: Test
+        working-directory: services/gateway-service
+        run: python -m pytest -q
