@@ -398,6 +398,85 @@ services:
     healthcheck:
       disable: true
 
+  audit-db-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-guardian}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      TARGET_DB: ${AUDIT_DB:-guardian_audit}
+    command:
+      - sh
+      - -ec
+      - |
+        case "$$TARGET_DB" in ''|*[!A-Za-z0-9_]*) echo "Invalid TARGET_DB" >&2; exit 2;; esac
+        exists="$$(psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$TARGET_DB'")"
+        if [ "$$exists" != "1" ]; then createdb "$$TARGET_DB"; fi
+
+  audit-migrate:
+    build:
+      context: ./services/audit-service
+    restart: "no"
+    depends_on:
+      audit-db-init:
+        condition: service_completed_successfully
+    environment:
+      AUDIT_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      AUDIT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${AUDIT_DB:-guardian_audit}
+    command: ["alembic", "upgrade", "head"]
+    healthcheck:
+      disable: true
+
+  audit-service:
+    build:
+      context: ./services/audit-service
+    restart: unless-stopped
+    depends_on:
+      audit-migrate:
+        condition: service_completed_successfully
+      identity-service:
+        condition: service_healthy
+      tenant-service:
+        condition: service_healthy
+    environment:
+      AUDIT_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      AUDIT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${AUDIT_DB:-guardian_audit}
+      AUDIT_IDENTITY_JWKS_URL: http://identity-service:8000/.well-known/jwks.json
+      AUDIT_IDENTITY_ISSUER: ${IDENTITY_JWT_ISSUER:-urn:it-guardian:identity}
+      AUDIT_IDENTITY_AUDIENCE: ${IDENTITY_JWT_AUDIENCE:-it-guardian-services}
+      AUDIT_TENANT_SERVICE_URL: http://tenant-service:8000
+    ports:
+      - "127.0.0.1:${AUDIT_PORT:-8006}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  audit-consumer:
+    build:
+      context: ./services/audit-service
+    restart: unless-stopped
+    depends_on:
+      audit-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    environment:
+      AUDIT_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      AUDIT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${AUDIT_DB:-guardian_audit}
+      AUDIT_NATS_URL: nats://nats:4222
+      AUDIT_NATS_STREAM: GUARDIAN_EVENTS
+      AUDIT_NATS_DURABLE: ${AUDIT_NATS_DURABLE:-guardian-audit-v1}
+      AUDIT_CONSUMER_BATCH_SIZE: ${AUDIT_CONSUMER_BATCH_SIZE:-100}
+    command: ["python", "-m", "app.consumer"]
+    healthcheck:
+      disable: true
+
 volumes:
   guardian-postgres:
   guardian-nats:
