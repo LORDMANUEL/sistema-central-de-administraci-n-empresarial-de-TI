@@ -13,8 +13,8 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 | v0.1.0 | Foundation + Identity | ✅ DONE / main |
 | v0.2.0 | Tenant | ✅ DONE / main |
 | v0.3.0 | Asset Service | ✅ DONE / main |
-| v0.4.0 | Enrollment + PKI | 🟡 EN DESARROLLO — PKI certificado; Enrollment en implementación |
-| v0.5.0 | Gateway + Audit | ⬜ PENDIENTE |
+| v0.4.0 | Enrollment + PKI | 🟢 CERTIFICADO — PR #6 listo para promoción a `main` |
+| v0.5.0 | Gateway + Audit | 🟡 SIGUIENTE — análisis/diseño tras merge v0.4 |
 | v0.6.0 | Agent Control + Command + Telemetry | ⬜ PENDIENTE |
 | v0.7.0 | Windows Agent Modern | ⬜ PENDIENTE |
 | v0.8.0 | Web Console MVP | ⬜ PENDIENTE |
@@ -71,33 +71,60 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 - [x] Smoke verifica aislamiento Root key y Enrollment signer.
 - [x] Smoke verifica CA init idempotente y teardown de volúmenes.
 
-## v0.4.0 Enrollment — GATE ACTUAL
+## v0.4.0 Enrollment — CERTIFICADO
 
-Flujo objetivo:
+Flujo certificado:
 
-`enrollment token -> validar tenant/asset -> registrar device -> CSR -> grant PKI <=120 s -> certificado -> device.enrolled`
+`enrollment token -> validar tenant/asset -> reservar device/issuance -> CSR -> grant PKI <=120 s -> certificado -> token CONSUMED -> device ENROLLED -> JetStream`
 
-- [ ] Modelo `EnrollmentToken` one-time/expirable/tenant-scoped.
-- [ ] Modelo `DeviceEnrollment` con `device_id` estable y vínculo a `guardian_asset_id`.
-- [ ] Token almacenado solo como hash; valor plaintext solo se entrega al crearlo.
-- [ ] Administración Identity + Tenant (`platform_admin`/`org_admin`).
-- [ ] Validación de Asset mediante API de Asset Service, sin leer su BD.
-- [ ] Consumo atómico one-time del token y protección frente a replay/carreras.
-- [ ] CSR recibido desde endpoint; private key permanece en dispositivo.
-- [ ] Enrollment signer Ed25519 separado con JWKS público.
-- [ ] Grant PKI `certificate_issue` <=120 s ligado a CSR/device/tenant/asset/issuance.
-- [ ] Cliente PKI con retries seguros/idempotentes por `issuance_id`.
-- [ ] Estado enrollment `pending -> certificate_issued -> enrolled`.
-- [ ] Transactional outbox `enrollment.token.created`, `device.enrolled`, `device.enrollment.failed`.
-- [ ] Health/readiness/métricas/request_id/logging secret-safe.
-- [ ] Alembic + BD `guardian_enrollment` independiente.
-- [ ] Docker no-root + Compose.
-- [ ] Tests unitarios/integración + migration round-trip.
-- [ ] E2E limpio `Identity -> Tenant -> Asset -> Enrollment -> PKI -> certificate -> JetStream`.
-- [ ] Verificar token replay rechazado y PKI signer/keys aislados.
-- [ ] Verificar retry tras incertidumbre de red sin emitir certificado duplicado.
-- [ ] CI final verde sobre el SHA candidato v0.4.
-- [ ] PR #6 listo para review y merge a `main`.
+- [x] Modelo `EnrollmentToken` one-time/expirable/tenant-scoped.
+- [x] Modelo `DeviceEnrollment` con `device_id` estable y vínculo a `guardian_asset_id`.
+- [x] Token almacenado solo como hash; valor plaintext solo se entrega al crearlo.
+- [x] Administración Identity + Tenant (`platform_admin`/`org_admin`).
+- [x] Validación de Asset mediante API de Asset Service, sin leer su BD.
+- [x] Reserva atómica one-time y protección frente a replay/carreras.
+- [x] Retry idéntico RESERVED/CONSUMED conserva `device_id` e `issuance_id`.
+- [x] CSR recibido desde endpoint; private key permanece en dispositivo.
+- [x] Enrollment signer Ed25519 separado con JWKS público.
+- [x] Grant PKI `certificate_issue` <=120 s ligado a CSR/device/tenant/asset/issuance.
+- [x] Cliente PKI con retries seguros/idempotentes por `issuance_id`.
+- [x] Recuperación: red/5xx y `issuance_conflict` conservan reserva/IDs; rechazo corregible libera token solo sin certificado.
+- [x] Estado persistente PENDING / FAILED / ENROLLED y token ACTIVE / RESERVED / CONSUMED / REVOKED / EXPIRED.
+- [x] Transactional outbox `enrollment.token.created`, `enrollment.token.revoked`, `device.enrolled`, `device.enrollment.failed`.
+- [x] Health/readiness/métricas/request_id/logging secret-safe.
+- [x] Alembic + BD `guardian_enrollment` independiente.
+- [x] Docker no-root + Compose en puerto 8005.
+- [x] Worker Enrollment sin `ENROLLMENT_SIGNING_KEY` y sin material CA.
+- [x] Tests unitarios/integración + migration round-trip.
+- [x] E2E limpio `Identity -> Tenant -> Asset -> Enrollment -> PKI -> certificate -> JetStream`.
+- [x] Token replay distinto rechazado con 409.
+- [x] Retry consumido devuelve mismo device/certificado sin nueva llamada PKI.
+- [x] Certificado X.509 real verificado con OpenSSL.
+- [x] `device.enrolled` verificado en JetStream sin token/CSR.
+- [x] Aislamiento signer/CA verificado por `docker inspect`.
+- [x] Teardown completo de contenedores y volúmenes.
+- [x] Identity/Tenant/Asset/Enrollment/PKI CI verdes sobre el mismo SHA candidato.
+- [x] PR #6 técnicamente listo para promoción a `main`.
+
+## Siguiente gate — v0.5.0 Gateway + Audit
+
+Antes de implementar se debe cerrar especificación y threat model. El alcance no incluye todavía Agent Control/Command/Telemetry.
+
+Objetivos mínimos:
+
+- [ ] Gateway como borde HTTP controlado con allowlist de rutas/servicios.
+- [ ] Propagación de `request_id` y contexto sin confiar en headers de identidad inyectables por cliente.
+- [ ] Validación JWT en el borde sin eliminar authn/authz de cada microservicio.
+- [ ] Límites de body/header, timeouts y rate limiting por ruta/actor/tenant.
+- [ ] Política explícita de retries: no repetir mutaciones no idempotentes.
+- [ ] Audit Service con BD `guardian_audit` propia y API solo lectura administrativa.
+- [ ] Ingesta idempotente de eventos de `GUARDIAN_EVENTS` por `event_id` único.
+- [ ] Registro de acciones de gateway que no generan eventos de dominio, incluidos rechazos relevantes.
+- [ ] Modelo append-only con evidencia de manipulación (`prev_hash`/`record_hash` o esquema equivalente validado).
+- [ ] Metadata de auditoría por allowlist; nunca bearer, password, enrollment token, CSR, private key ni signing seed.
+- [ ] `platform_admin` global y lectura tenant-scoped para `org_admin` activo.
+- [ ] Tests de aislamiento cross-tenant, dedupe, hash-chain/tamper y secret safety.
+- [ ] Docker no-root, migración round-trip, Compose y clean-stack E2E.
 
 ## Definition of Done
 
@@ -108,7 +135,7 @@ Flujo objetivo:
 5. Health/readiness, Prometheus y `request_id`.
 6. Docker no-root y Compose.
 7. Tests unitarios e integración verdes.
-8. Transactional outbox para eventos.
+8. Transactional outbox para eventos cuando el dominio emita eventos.
 9. CI: compile, tests, imagen y Compose.
 10. Documentación y notas de seguridad.
 11. Integración E2E con servicios anteriores.
