@@ -34,7 +34,7 @@ def create_app(*, database_url: str | None = None, signing_key: str | None = Non
     except GuardianError as exc:
         signer_error = exc
 
-    app = FastAPI(title="IT Guardian Enrollment Service", version="0.4.0-dev.1")
+    app = FastAPI(title="IT Guardian Enrollment Service", version="0.4.0")
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = session_factory
