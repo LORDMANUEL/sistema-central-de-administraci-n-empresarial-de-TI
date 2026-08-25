@@ -79,24 +79,10 @@ def create_app(
     def health_ready() -> dict[str, str]:
         try:
             database_ready(engine)
-            _signer_ready(settings.ca_cert_path, settings.ca_key_path)
-        except GuardianError:
-            raise
         except Exception as exc:
             raise GuardianError(503, "pki.database_unavailable", "PKI database is unavailable") from exc
+        _signer_ready(settings.ca_cert_path, settings.ca_key_path)
         return {"status": "ready", "service": settings.service_name}
-
-    @app.get("/api/v1/pki/root-ca.pem", response_class=Response)
-    def root_ca() -> Response:
-        try:
-            pem = Path(settings.root_cert_path).read_text(encoding="utf-8")
-        except Exception as exc:
-            raise GuardianError(503, "pki.root_ca_unavailable", "PKI Root CA certificate is unavailable") from exc
-        return Response(content=pem, media_type="application/x-pem-file")
-
-    @app.get("/.well-known/jwks.json")
-    def jwks_not_applicable() -> dict:
-        return {"keys": []}
 
     @app.get("/metrics")
     def metrics() -> Response:
