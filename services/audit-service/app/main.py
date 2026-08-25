@@ -3,9 +3,11 @@ from __future__ import annotations
 from fastapi import FastAPI
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .auth import IdentityAccessVerifier
 from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
 from .errors import GuardianError, guardian_error_handler, http_error_handler, request_id_middleware
+from .tenant_client import TenantAccessClient
 
 
 def create_app(*, database_url: str | None = None) -> FastAPI:
@@ -23,6 +25,11 @@ def create_app(*, database_url: str | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = session_factory
+    app.state.identity_verifier = IdentityAccessVerifier(settings)
+    app.state.tenant_access_client = TenantAccessClient(
+        settings.tenant_service_url,
+        timeout_seconds=settings.downstream_timeout_seconds,
+    )
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_error_handler)
