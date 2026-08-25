@@ -8,6 +8,7 @@ from sqlalchemy import select
 from .auth import IdentityPrincipal, current_principal, enforce_audit_read
 from .chain import verify_chain
 from .errors import GuardianError
+from .metrics import CHAIN_VERIFICATION_FAILURES
 from .models import AuditRecord
 from .schemas import AuditChainVerificationResponse, AuditRecordListResponse, AuditRecordResponse
 
@@ -131,6 +132,8 @@ def verify_audit_chain(
     chain_key = f"tenant:{tenant_id}" if tenant_id else "platform"
     with request.app.state.session_factory() as session:
         result = verify_chain(session, chain_key)
+    if not result.valid:
+        CHAIN_VERIFICATION_FAILURES.inc()
     return AuditChainVerificationResponse(
         chain_key=chain_key,
         valid=result.valid,

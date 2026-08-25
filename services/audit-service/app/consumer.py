@@ -9,6 +9,7 @@ from typing import Any
 from .chain import AuditEntry, append_record
 from .config import get_settings
 from .database import build_engine, build_session_factory
+from .metrics import EVENTS_DUPLICATE, EVENTS_FAILED, EVENTS_INSERTED, EVENTS_RECEIVED
 from .normalize import EventNormalizationError, NormalizedAuditEvent, normalize_event
 
 logger = logging.getLogger("guardian.audit.consumer")
@@ -41,6 +42,7 @@ def _entry(normalized: NormalizedAuditEvent) -> AuditEntry:
 
 async def ingest_message(session_factory, message: Any) -> IngestResult:
     event_id: str | None = None
+    EVENTS_RECEIVED.inc()
     try:
         raw = message.data
         if not isinstance(raw, (bytes, bytearray)):
@@ -56,19 +58,24 @@ async def ingest_message(session_factory, message: Any) -> IngestResult:
 
         # ACK only after commit (or after duplicate lookup/commit completed).
         await message.ack()
+        if created:
+            EVENTS_INSERTED.inc()
+        else:
+            EVENTS_DUPLICATE.inc()
         return IngestResult(
             status="inserted" if created else "duplicate",
             event_id=event_id,
             record_id=record_id,
         )
     except (UnicodeDecodeError, json.JSONDecodeError, EventNormalizationError):
-        # Do not log the raw message: it can contain secrets from malformed producers.
-        logger.warning("Audit event rejected during safe envelope normalization", extra={"event_id": event_id})
+        EVENTS_FAILED.inc()
+        # No raw message or exception text: malformed producers may contain secrets.
+        logger.warning("Audit event rejected during safe envelope normalization")
         return IngestResult(status="failed", event_id=event_id)
     except Exception:
-        # Intentionally omit exception message/payload from structured context because
-        # downstream driver errors can echo values. Operators get a stable failure signal.
-        logger.exception("Audit event ingestion failed", extra={"event_id": event_id})
+        EVENTS_FAILED.inc()
+        # No traceback/exception interpolation. DB/NATS drivers may echo secret values.
+        logger.error("Audit event ingestion failed")
         return IngestResult(status="failed", event_id=event_id)
 
 
@@ -99,7 +106,8 @@ async def run_consumer() -> None:
                     max_reconnect_attempts=-1,
                 )
             except Exception:
-                logger.exception("Unable to connect Audit consumer to NATS; retrying")
+                # Never log the configured NATS URL because it may embed credentials.
+                logger.error("Unable to connect Audit consumer to NATS; retrying")
                 await asyncio.sleep(5)
 
         js = connection.jetstream()
@@ -119,7 +127,7 @@ async def run_consumer() -> None:
             except NatsTimeoutError:
                 continue
             except Exception:
-                logger.exception("Audit JetStream fetch failed; backing off")
+                logger.error("Audit JetStream fetch failed; backing off")
                 await asyncio.sleep(2)
                 continue
 

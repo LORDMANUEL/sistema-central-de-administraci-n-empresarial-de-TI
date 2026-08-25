@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api import router as audit_router
@@ -8,6 +8,8 @@ from .auth import IdentityAccessVerifier
 from .config import Settings, get_settings
 from .database import build_engine, build_session_factory, database_ready
 from .errors import GuardianError, guardian_error_handler, http_error_handler, request_id_middleware
+from .logging import http_observability_middleware
+from .metrics import render_metrics
 from .tenant_client import TenantAccessClient
 
 
@@ -32,6 +34,7 @@ def create_app(*, database_url: str | None = None) -> FastAPI:
         timeout_seconds=settings.downstream_timeout_seconds,
     )
     app.middleware("http")(request_id_middleware)
+    app.middleware("http")(http_observability_middleware)
     app.add_exception_handler(GuardianError, guardian_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_error_handler)
     app.include_router(audit_router)
@@ -47,6 +50,11 @@ def create_app(*, database_url: str | None = None) -> FastAPI:
         except Exception as exc:
             raise GuardianError(503, "audit.database_unavailable", "Audit database is unavailable") from exc
         return {"status": "ready", "service": settings.service_name}
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        payload, content_type = render_metrics()
+        return Response(content=payload, media_type=content_type)
 
     return app
 
