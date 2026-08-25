@@ -22,11 +22,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=9,<10"]
+test = [
+  "pytest>=9,<10",
+  "pytest-asyncio>=1,<2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+asyncio_mode = "strict"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
