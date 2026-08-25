@@ -116,3 +116,55 @@ jobs:
       - name: Tear down volumes
         if: always()
         run: docker compose down -v --remove-orphans
+
+  clean-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [test, docker-build, compose-config, postgres-append-only]
+    env:
+      POSTGRES_PASSWORD: ci-password-not-for-production
+      IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+      ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
+      GUARDIAN_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure clean volumes before certification
+        run: docker compose down -v --remove-orphans || true
+      - name: Build and start clean Guardian v0.4 plus Audit stack
+        run: docker compose up -d --build
+      - name: Exercise certified Identity to Tenant to Asset to Enrollment to PKI flow
+        run: python tests/e2e/enrollment_smoke.py
+      - name: Certify Audit chain dedupe isolation append-only and secret safety
+        run: python tests/e2e/audit_smoke.py
+      - name: Verify Audit consumer secret isolation at runtime
+        run: |
+          consumer_id="$(docker compose ps -q audit-consumer)"
+          test -n "$consumer_id"
+          python - "$consumer_id" <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          consumer_id = sys.argv[1]
+          inspected = json.loads(subprocess.check_output(["docker", "inspect", consumer_id]))[0]
+          env = inspected["Config"]["Env"]
+          forbidden_prefixes = (
+              "IDENTITY_SIGNING_KEY=",
+              "ENROLLMENT_SIGNING_KEY=",
+              "PKI_CA_KEY_PATH=",
+              "AUDIT_IDENTITY_JWKS_URL=",
+              "AUDIT_TENANT_SERVICE_URL=",
+          )
+          assert not any(value.startswith(forbidden_prefixes) for value in env), env
+          mounts = {item["Destination"] for item in inspected["Mounts"]}
+          assert "/var/lib/guardian/pki-root" not in mounts, mounts
+          assert "/var/lib/guardian/pki" not in mounts, mounts
+          PY
+      - name: Dump clean-stack state on failure
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=700
+      - name: Tear down clean stack and volumes
+        if: always()
+        run: docker compose down -v --remove-orphans
