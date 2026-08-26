@@ -57,6 +57,17 @@ def sanitize_inbound_headers(
             continue
         outgoing[name] = value
 
-    # Server-owned correlation header always replaces any caller value.
     outgoing["X-Request-ID"] = request_id
+    return outgoing
+
+
+def sanitize_upstream_response_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    outgoing: dict[str, str] = {}
+    for name, value in headers.items():
+        lower = name.lower()
+        if lower in _HOP_BY_HOP or lower in {"content-length", "x-request-id"}:
+            continue
+        if lower.startswith("x-guardian-") or lower == "forwarded" or lower.startswith("x-forwarded-"):
+            continue
+        outgoing[name] = value
     return outgoing
