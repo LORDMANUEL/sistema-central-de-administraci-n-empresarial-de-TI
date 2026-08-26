@@ -11,6 +11,7 @@ class GatewayError(Exception):
     status_code: int
     code: str
     message: str
+    headers: dict[str, str] | None = None
 
     def __str__(self) -> str:
         return self.message
@@ -20,6 +21,7 @@ async def gateway_error_handler(request: Request, exc: GatewayError) -> JSONResp
     request_id = getattr(request.state, "request_id", None)
     return JSONResponse(
         status_code=exc.status_code,
+        headers=exc.headers or None,
         content={
             "error": {
                 "code": exc.code,
