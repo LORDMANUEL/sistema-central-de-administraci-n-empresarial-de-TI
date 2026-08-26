@@ -19,9 +19,12 @@ class GatewayError(Exception):
 
 async def gateway_error_handler(request: Request, exc: GatewayError) -> JSONResponse:
     request_id = getattr(request.state, "request_id", None)
+    headers = dict(exc.headers or {})
+    if request_id:
+        headers["X-Request-ID"] = request_id
     return JSONResponse(
         status_code=exc.status_code,
-        headers=exc.headers or None,
+        headers=headers or None,
         content={
             "error": {
                 "code": exc.code,
