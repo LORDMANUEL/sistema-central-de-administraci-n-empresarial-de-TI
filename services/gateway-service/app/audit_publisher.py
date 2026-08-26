@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +15,67 @@ from .routes import RoutePolicy
 
 class AuditEventPublisher(Protocol):
     async def publish(self, subject: str, payload: bytes, *, event_id: str) -> None: ...
+
+
+class NatsJetStreamAuditPublisher:
+    """Lazy JetStream publisher used by the northbound Gateway.
+
+    No connection URL or driver exception is logged here. Required audit intent errors
+    are converted to a stable secret-safe 503 by execute_with_audit().
+    """
+
+    def __init__(self, url: str, stream: str, *, connect_timeout_seconds: float = 3.0) -> None:
+        self._url = url
+        self._stream = stream
+        self._connect_timeout_seconds = connect_timeout_seconds
+        self._connection = None
+        self._jetstream = None
+        self._lock = asyncio.Lock()
+
+    async def _ensure_connected(self):
+        if self._connection is not None and not self._connection.is_closed and self._jetstream is not None:
+            return self._jetstream
+
+        async with self._lock:
+            if self._connection is not None and not self._connection.is_closed and self._jetstream is not None:
+                return self._jetstream
+
+            import nats
+            from nats.js.errors import NotFoundError
+
+            connection = await nats.connect(
+                self._url,
+                connect_timeout=self._connect_timeout_seconds,
+                max_reconnect_attempts=2,
+            )
+            jetstream = connection.jetstream()
+            try:
+                await jetstream.stream_info(self._stream)
+            except NotFoundError:
+                try:
+                    await jetstream.add_stream(name=self._stream, subjects=["guardian.>"])
+                except Exception:
+                    # A second service may have created the stream concurrently.
+                    await jetstream.stream_info(self._stream)
+
+            self._connection = connection
+            self._jetstream = jetstream
+            return jetstream
+
+    async def publish(self, subject: str, payload: bytes, *, event_id: str) -> None:
+        jetstream = await self._ensure_connected()
+        await jetstream.publish(
+            subject,
+            payload,
+            headers={"Nats-Msg-Id": event_id},
+            timeout=self._connect_timeout_seconds,
+        )
+
+    async def close(self) -> None:
+        if self._connection is not None and not self._connection.is_closed:
+            await self._connection.drain()
+        self._connection = None
+        self._jetstream = None
 
 
 @dataclass(frozen=True)
@@ -108,8 +170,6 @@ async def execute_with_audit(
             outcome="accepted",
         )
     except Exception as exc:
-        # Do not interpolate the publisher exception. NATS/network errors may contain
-        # credentials or connection strings.
         raise GatewayError(
             503,
             "gateway.audit_unavailable",
@@ -140,8 +200,6 @@ async def execute_with_audit(
             outcome=outcome,
         )
     except Exception:
-        # The mutation has already happened. Never retry it merely because the
-        # completion event failed; Task 15 exposes this condition as a metric/log.
         return GatewayExecutionResult(response=response, completion_audit_failed=True)
 
     return GatewayExecutionResult(response=response)
