@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.headers import normalize_request_id, sanitize_inbound_headers
+from app.headers import normalize_request_id, sanitize_inbound_headers, sanitize_upstream_response_headers
 
 
 def test_sanitize_headers_strips_spoofable_forwarded_hop_by_hop_and_host():
@@ -81,3 +81,29 @@ def test_normalize_request_id_preserves_bounded_safe_values_and_replaces_unsafe_
 
     too_long = normalize_request_id("x" * 129, max_length=128)
     assert len(too_long) == 36
+
+
+def test_upstream_response_headers_cannot_override_gateway_owned_or_hop_by_hop_headers():
+    sanitized = sanitize_upstream_response_headers(
+        {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+            "Content-Length": "999999",
+            "Connection": "keep-alive",
+            "Transfer-Encoding": "chunked",
+            "X-Request-ID": "upstream-spoof",
+            "X-Guardian-Role": "platform_admin",
+        }
+    )
+    lowered = {key.lower(): value for key, value in sanitized.items()}
+
+    assert lowered["content-type"] == "application/json"
+    assert lowered["cache-control"] == "no-store"
+    for forbidden in (
+        "content-length",
+        "connection",
+        "transfer-encoding",
+        "x-request-id",
+        "x-guardian-role",
+    ):
+        assert forbidden not in lowered
