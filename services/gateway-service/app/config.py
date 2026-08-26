@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     identity_audience: str = "it-guardian-services"
     jwks_cache_seconds: int = Field(default=300, ge=1, le=3600)
 
+    nats_url: str = "nats://nats:4222"
+    nats_stream: str = "GUARDIAN_EVENTS"
+    nats_connect_timeout_seconds: float = Field(default=3.0, gt=0, le=15)
+
     default_max_body_bytes: int = Field(default=1024 * 1024, ge=1024, le=16 * 1024 * 1024)
     default_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     max_request_id_length: int = Field(default=128, ge=16, le=256)
