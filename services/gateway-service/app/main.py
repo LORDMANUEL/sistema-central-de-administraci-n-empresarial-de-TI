@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from .auth import IdentityAccessVerifier
 from .config import Settings
 from .errors import GatewayError, gateway_error_handler
 from .routes import RouteRegistry, build_route_policies
@@ -12,6 +13,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="IT Guardian Gateway Service", version="0.5.0-dev.1")
     app.state.settings = resolved
     app.state.route_registry = RouteRegistry(build_route_policies(resolved))
+    app.state.identity_verifier = IdentityAccessVerifier(resolved)
     app.add_exception_handler(GatewayError, gateway_error_handler)
 
     @app.get("/health/live")
