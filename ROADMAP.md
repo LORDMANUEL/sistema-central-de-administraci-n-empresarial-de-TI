@@ -1,21 +1,21 @@
 # IT Guardian — Roadmap de producto
 
-Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta a punta**.
+Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta a punta**. Ningún servicio se marca DONE solo por tener código o unit tests.
 
 ## Camino crítico Core MVP
 
 `Identity -> Tenant -> Asset -> Enrollment/PKI -> Gateway/Audit -> Agent Control/Command/Telemetry -> Windows Agent -> Web Console`
 
-## Estado de versiones
+## Estado real de versiones
 
 | Versión | Entrega | Estado |
 |---|---|---|
 | v0.1.0 | Foundation + Identity | ✅ DONE / main |
 | v0.2.0 | Tenant | ✅ DONE / main |
 | v0.3.0 | Asset Service | ✅ DONE / main |
-| v0.4.0 | Enrollment + PKI | ✅ DONE / main — merge PR #6 |
-| v0.5.0 | Gateway + Audit | 🟡 EN DISEÑO — siguiente gate activo |
-| v0.6.0 | Agent Control + Command + Telemetry | ⬜ PENDIENTE |
+| v0.4.0 | Enrollment + PKI | ✅ DONE / main |
+| v0.5.0 | Gateway + Audit | ✅ DONE / main — PR #7 mergeado |
+| v0.6.0 | Agent Control + Command + Telemetry | 🟡 EN DESARROLLO — PR #8 draft |
 | v0.7.0 | Windows Agent Modern | ⬜ PENDIENTE |
 | v0.8.0 | Web Console MVP | ⬜ PENDIENTE |
 | v0.9.0 | Software + Patch + Policy | ⬜ PENDIENTE |
@@ -29,131 +29,146 @@ Regla de entrega: **cada versión debe agregar una capacidad utilizable de punta
 | v0.17.0 | Android/iOS MDM + Location | ⬜ PENDIENTE |
 | v0.18.0 | DFIR + Vulnerability | ⬜ PENDIENTE |
 | v0.19.0 | Automation + Reports + Licensing | ⬜ PENDIENTE |
-| v0.20.0-rc | Release Candidate | ⬜ PENDIENTE |
+| v0.20.0-rc | Release Candidate integral | ⬜ PENDIENTE |
 | v1.0.0 | Enterprise Stable | ⬜ PENDIENTE |
 
-## v0.3.0 Asset Service — DONE
+## v0.1–v0.5 — Core servidor estable
 
-- [x] Modelo canónico de activos y `guardian_asset_id` estable.
-- [x] Correlación de IDs externos.
-- [x] API `/api/v1` y BD `guardian_asset` independiente.
-- [x] Tenant-scoped authorization sin compartir BD.
-- [x] Validación tenant/site/department antes de persistir.
-- [x] Transactional outbox + JetStream idempotente y resiliente.
-- [x] JWT Ed25519/JWKS.
-- [x] Health/readiness/métricas/request ID.
-- [x] Alembic y Docker no-root.
-- [x] E2E `Identity -> Tenant -> Asset -> JetStream`.
-- [x] Instalación limpia y teardown completo en CI.
-- [x] PR #3 mergeado a `main` el 2026-08-24.
+- [x] Identity: bootstrap, Argon2, JWT Ed25519/JWKS, RBAC.
+- [x] Tenant: empresas, membresías, sedes, departamentos y tenant authorization.
+- [x] Asset: inventario canónico, IDs externos y referencias Tenant validadas por API.
+- [x] Enrollment: token one-time, reserva idempotente y device identity.
+- [x] PKI: Root/Intermediate, CSR, emisión, revocación, CRL y rotación.
+- [x] NATS JetStream y transactional outbox donde corresponde.
+- [x] Gateway: allowlist estática, JWT, sanitización de headers, límites, rate-limit y proxy seguro.
+- [x] Gateway: mutaciones administrativas fail-closed si Audit/NATS no confirma intención.
+- [x] Audit: BD independiente, dedupe, append-only, hash chain y consulta administrativa.
+- [x] Docker/Compose para el core v0.5.
+- [x] Clean-stack y E2E certificados para los releases integrados antes de merge.
 
-## v0.4.0 PKI — DONE
+## Gate activo — v0.6.0 Endpoint Operations Core
 
-- [x] Root CA RSA-4096 + Device Intermediate RSA-3072.
-- [x] Inicialización idempotente y fail-safe; no sobreescribe CA inconsistente/parcial.
-- [x] Root private key disponible únicamente para `pki-ca-init`.
-- [x] Runtime API monta solo Intermediate online read-only; worker no monta material CA.
-- [x] Device private key nunca cruza la API.
-- [x] CSR RSA >=2048 y EC P-256/P-384; claves débiles/no soportadas rechazadas.
-- [x] Certificado cliente con CA=false, CLIENT_AUTH, SKI/AKI y SAN Guardian.
-- [x] Grants Enrollment Ed25519 <=120 s ligados a tenant/asset/device/issuance/CSR.
-- [x] Emisión idempotente por `issuance_id`.
-- [x] Administración Identity + Tenant (`platform_admin`/`org_admin`).
-- [x] Revocación persistente e idempotente.
-- [x] CRL firmada con seriales revocados.
-- [x] Rotación atómica con nueva clave obligatoria y anterior `superseded`.
-- [x] Transactional outbox `pki.certificate.*` + JetStream.
-- [x] Prometheus, request_id y logs secret-safe.
-- [x] Alembic + BD `guardian_pki`.
-- [x] Docker no-root + Compose.
-- [x] Tests/compile/migration round-trip verdes.
-- [x] Clean-stack `pki-smoke`: emisión -> revocación -> CRL -> JetStream.
-- [x] Smoke verifica aislamiento Root key y Enrollment signer.
-- [x] Smoke verifica CA init idempotente y teardown de volúmenes.
+Objetivo: cerrar comunicación durable entre servidor y endpoint antes de escribir el agente Windows real.
 
-## v0.4.0 Enrollment — DONE
+### Agent Control
 
-Flujo certificado:
+- [x] modelo de heartbeat y binding tenant/asset/device.
+- [x] capacidades normalizadas y transición online.
+- [x] detección de offline básica.
+- [ ] API autenticada por identidad de dispositivo confiable.
+- [ ] transactional outbox + eventos `device.online`, `device.offline`, `device.capabilities.changed`.
+- [ ] Alembic + BD `guardian_agent_control`.
+- [ ] Docker no-root + Compose.
+- [ ] métricas/logs/request ID.
+- [ ] E2E desde Enrollment/certificado hasta heartbeat.
 
-`enrollment token -> validar tenant/asset -> reservar device/issuance -> CSR -> grant PKI <=120 s -> certificado -> token CONSUMED -> device ENROLLED -> JetStream`
+### Command Service
 
-- [x] Modelo `EnrollmentToken` one-time/expirable/tenant-scoped.
-- [x] Modelo `DeviceEnrollment` con `device_id` estable y vínculo a `guardian_asset_id`.
-- [x] Token almacenado solo como hash; valor plaintext solo se entrega al crearlo.
-- [x] Administración Identity + Tenant (`platform_admin`/`org_admin`).
-- [x] Validación de Asset mediante API de Asset Service, sin leer su BD.
-- [x] Reserva atómica one-time y protección frente a replay/carreras.
-- [x] Retry idéntico RESERVED/CONSUMED conserva `device_id` e `issuance_id`.
-- [x] CSR recibido desde endpoint; private key permanece en dispositivo.
-- [x] Enrollment signer Ed25519 separado con JWKS público.
-- [x] Grant PKI `certificate_issue` <=120 s ligado a CSR/device/tenant/asset/issuance.
-- [x] Cliente PKI con retries seguros/idempotentes por `issuance_id`.
-- [x] Recuperación: red/5xx y `issuance_conflict` conservan reserva/IDs; rechazo corregible libera token solo sin certificado.
-- [x] Estado persistente PENDING / FAILED / ENROLLED y token ACTIVE / RESERVED / CONSUMED / REVOKED / EXPIRED.
-- [x] Transactional outbox `enrollment.token.created`, `enrollment.token.revoked`, `device.enrolled`, `device.enrollment.failed`.
-- [x] Health/readiness/métricas/request_id/logging secret-safe.
-- [x] Alembic + BD `guardian_enrollment` independiente.
-- [x] Docker no-root + Compose en puerto 8005.
-- [x] Worker Enrollment sin `ENROLLMENT_SIGNING_KEY` y sin material CA.
-- [x] Tests unitarios/integración + migration round-trip.
-- [x] E2E limpio `Identity -> Tenant -> Asset -> Enrollment -> PKI -> certificate -> JetStream`.
-- [x] Token replay distinto rechazado con 409.
-- [x] Retry consumido devuelve mismo device/certificado sin nueva llamada PKI.
-- [x] Certificado X.509 real verificado con OpenSSL.
-- [x] `device.enrolled` verificado en JetStream sin token/CSR.
-- [x] Aislamiento signer/CA verificado por `docker inspect`.
-- [x] Teardown completo de contenedores y volúmenes.
-- [x] Identity/Tenant/Asset/Enrollment/PKI CI verdes sobre el mismo SHA de release.
-- [x] PR #6 squash-mergeado a `main` como v0.4.0.
+- [x] allowlist inicial: `inventory.refresh`, `device.reboot`, `service.restart`.
+- [x] creación idempotente por tenant + idempotency key.
+- [x] adquisición aislada por tenant/asset/device en construcción y bajo CI.
+- [ ] leases expirables y reacquisition segura.
+- [ ] result state machine monotónica.
+- [ ] replay idéntico idempotente / replay conflictivo rechazado.
+- [ ] admin API create/get/list/cancel.
+- [ ] device API acquire/running/result.
+- [ ] transactional outbox + wake-up subject por device.
+- [ ] Alembic + BD `guardian_command`.
+- [ ] Docker no-root + Compose.
+- [ ] auth/metrics/logs/request ID.
+- [ ] E2E command -> device simulator -> result -> Audit.
 
-## Gate activo — v0.5.0 Gateway + Audit
+### Telemetry Service
 
-El alcance de v0.5 está limitado a **borde HTTP seguro + auditoría inmutable/tamper-evident**. Agent Control, Command y Telemetry permanecen en v0.6.
+- [x] esquema inicial de métricas permitido.
+- [x] ingestión/dedupe inicial.
+- [ ] API device-facing autenticada.
+- [ ] latest read administrativa tenant-scoped.
+- [ ] límites de tamaño/frecuencia y rechazo de métricas arbitrarias.
+- [ ] Alembic + BD `guardian_telemetry`.
+- [ ] Docker no-root + Compose.
+- [ ] observabilidad y outbox/eventos cuando corresponda.
+- [ ] E2E con simulador de dispositivo.
 
-Objetivos mínimos:
+### Gate de promoción v0.6
 
-- [ ] Gateway como único borde HTTP norte para APIs de administración, con allowlist estática de rutas/métodos/upstreams.
-- [ ] Rutas internas de PKI/Enrollment no expuestas por Gateway.
-- [ ] Propagación de `request_id` sin confiar en headers de identidad inyectables por cliente.
-- [ ] Sanitización de `X-Guardian-*`, hop-by-hop y `X-Forwarded-*` no confiables.
-- [ ] Validación JWT temprana en el borde sin eliminar authn/authz de cada microservicio.
-- [ ] Modos de ruta explícitos: pública, bearer admin, endpoint enrollment e internal-only.
-- [ ] Límites de body/header, timeouts y rate limiting por clase de ruta/actor/IP/tenant.
-- [ ] Política de retries: cero retries automáticos para mutaciones; solo reads seguros bajo condiciones explícitas.
-- [ ] Gateway emite auditoría de mutaciones privilegiadas con `request_id` y metadata allowlisted, nunca bodies/secrets.
-- [ ] Mutaciones administrativas fail-closed si no se puede registrar el evento de auditoría previo.
-- [ ] Audit Service con BD `guardian_audit` propia y API solo lectura administrativa.
-- [ ] Ingesta durable/idempotente de eventos de `GUARDIAN_EVENTS` por `source_event_id` único.
-- [ ] Registro de acciones de Gateway que no generan evento de dominio, incluidos rechazos relevantes.
-- [ ] Modelo append-only con cadena hash particionada (`prev_hash`, `record_hash`, sequence/head).
-- [ ] Trigger/controles que impidan UPDATE/DELETE de registros auditables desde el rol normal de servicio.
-- [ ] Metadata de auditoría por adapters/allowlist; nunca bearer, password, enrollment token/hash, CSR, private key ni signing seed.
-- [ ] `platform_admin` global y lectura tenant-scoped para `org_admin` de tenant activo.
-- [ ] API de consulta con filtros + keyset pagination y endpoint de verificación de cadena.
-- [ ] Tests de aislamiento cross-tenant, dedupe/redelivery, tamper, SSRF/routing, header spoofing, rate limit y secret safety.
-- [ ] Docker no-root, Alembic round-trip, Compose y clean-stack E2E del core pasando por Gateway y consultando Audit.
+- [ ] Agent Control CI completo verde.
+- [ ] Command CI completo verde.
+- [ ] Telemetry CI completo verde.
+- [ ] todos los CI previos v0.1–v0.5 verdes sobre el mismo SHA candidato.
+- [ ] `docker compose config` válido.
+- [ ] instalación limpia desde volúmenes vacíos.
+- [ ] simulador enrolado usa identidad de dispositivo y no headers elegidos por cliente.
+- [ ] heartbeat -> online -> telemetry -> command -> result funciona de punta a punta.
+- [ ] eventos aparecen en JetStream.
+- [ ] acciones administrativas aparecen en Audit.
+- [ ] secret scan y aislamiento de claves/certificados aprobados.
+- [ ] teardown completo.
+- [ ] PR #8 fuera de draft solo después de todos los puntos anteriores.
 
-## Definition of Done
+## v0.7.0 — Windows Agent Modern
 
-1. API `/api/v1` y errores normalizados.
+Primer binario real de endpoint. No se marca DONE hasta producir artefactos reproducibles.
+
+- [ ] servicio Windows no interactivo y usuario de privilegio mínimo.
+- [ ] enrollment local con generación de private key + CSR.
+- [ ] almacenamiento seguro de certificado/clave.
+- [ ] heartbeat y capability negotiation.
+- [ ] CPU/RAM/disco/SO + inventario base.
+- [ ] command acquire/execute/result para allowlist v0.6.
+- [ ] spool local offline + retry con backoff.
+- [ ] actualización firmada + rollback.
+- [ ] MSI/EXE versionado y hash publicado por CI.
+- [ ] pruebas Windows 10/11 modernas.
+- [ ] matriz legacy Windows 7/8/8.1 separada.
+
+## v0.8.0 — Web Console MVP
+
+- [ ] login real por Gateway.
+- [ ] selector tenant/sede.
+- [ ] inventario de activos/dispositivos.
+- [ ] estado online/offline y telemetry básica.
+- [ ] creación/seguimiento de comandos permitidos.
+- [ ] visor Audit.
+- [ ] enrollment flow administrable.
+- [ ] RBAC UI consistente con backend.
+- [ ] build Docker reproducible y E2E navegador.
+
+## Definition of Done por microservicio
+
+1. API/runtime real y errores normalizados.
 2. Autenticación/autorización explícita.
-3. Base de datos propia del dominio.
-4. Alembic `upgrade -> downgrade -> upgrade`.
-5. Health/readiness, Prometheus y `request_id`.
+3. Base de datos propia cuando persista estado.
+4. Alembic `upgrade -> downgrade -> upgrade` cuando aplique.
+5. `/health/live`, `/health/ready`, Prometheus y `request_id`.
 6. Docker no-root y Compose.
 7. Tests unitarios e integración verdes.
-8. Transactional outbox para eventos cuando el dominio emita eventos.
-9. CI: compile, tests, imagen y Compose.
-10. Documentación y notas de seguridad.
-11. Integración E2E con servicios anteriores.
-12. Cero mocks/endpoints vacíos en producción.
+8. Transactional outbox cuando emita eventos de dominio.
+9. CI: compile, tests, imagen, migraciones y Compose según aplique.
+10. Documentación operativa y notas de seguridad.
+11. Integración E2E con los servicios anteriores.
+12. Cero mocks/endpoints vacíos declarados producción.
 13. Instalación limpia reproducible desde volúmenes vacíos.
-14. Retry/replay/idempotencia probados cuando el dominio lo requiera.
+14. Retry/replay/idempotencia probados cuando aplique.
+15. El servicio se prueba sobre el mismo SHA que se pretende promover.
 
 ## Gate Core MVP
 
-Una instalación limpia debe poder: iniciar Compose; crear/autenticar `platform_admin`; crear empresa/sede/activo; enrolar e instalar un agente Windows; recibir heartbeat e inventario; ejecutar un comando; recibir resultado; y consultar auditoría desde Web Console.
+Una instalación limpia debe poder:
+
+- [ ] iniciar el servidor completo;
+- [ ] crear/autenticar `platform_admin`;
+- [ ] crear empresa/sede/departamento/activo;
+- [ ] enrolar un endpoint y emitir certificado;
+- [ ] instalar Windows Agent;
+- [ ] recibir heartbeat y mostrar ONLINE;
+- [ ] recibir CPU/RAM/disco/SO e inventario;
+- [ ] ejecutar un comando permitido;
+- [ ] recibir resultado idempotente;
+- [ ] consultar la operación en Audit;
+- [ ] administrar todo desde Web Console;
+- [ ] actualizar/rollback sin destruir datos.
 
 ## Compatibilidad legacy
 
-Windows 7/8/8.1, macOS Lion–10.12, KaiOS, Symbian y adaptadores Huawei específicos usan una matriz de capacidades separada y no bloquean el núcleo moderno salvo requisito expreso de release.
+Windows 7/8/8.1, macOS Lion–10.12, KaiOS, Symbian y adaptadores Huawei específicos usan una matriz de capacidades separada. No bloquean el núcleo moderno salvo requisito expreso de release.
