@@ -4,20 +4,15 @@ services:
       context: ./services/gateway-service
     restart: unless-stopped
     depends_on:
-      nats:
-        condition: service_started
-      identity-service:
-        condition: service_healthy
-      tenant-service:
-        condition: service_healthy
-      asset-service:
-        condition: service_healthy
-      enrollment-service:
-        condition: service_healthy
-      pki-service:
-        condition: service_healthy
-      audit-service:
-        condition: service_healthy
+      nats: {condition: service_started}
+      identity-service: {condition: service_healthy}
+      tenant-service: {condition: service_healthy}
+      asset-service: {condition: service_healthy}
+      enrollment-service: {condition: service_healthy}
+      pki-service: {condition: service_healthy}
+      audit-service: {condition: service_healthy}
+      command-service: {condition: service_healthy}
+      telemetry-service: {condition: service_healthy}
     environment:
       GATEWAY_ENVIRONMENT: ${GUARDIAN_ENV:-production}
       GATEWAY_IDENTITY_SERVICE_URL: http://identity-service:8000
@@ -26,6 +21,8 @@ services:
       GATEWAY_ENROLLMENT_SERVICE_URL: http://enrollment-service:8000
       GATEWAY_PKI_SERVICE_URL: http://pki-service:8000
       GATEWAY_AUDIT_SERVICE_URL: http://audit-service:8000
+      GATEWAY_COMMAND_SERVICE_URL: http://command-service:8000
+      GATEWAY_TELEMETRY_SERVICE_URL: http://telemetry-service:8000
       GATEWAY_IDENTITY_JWKS_URL: http://identity-service:8000/.well-known/jwks.json
       GATEWAY_IDENTITY_ISSUER: ${IDENTITY_JWT_ISSUER:-urn:it-guardian:identity}
       GATEWAY_IDENTITY_AUDIENCE: ${IDENTITY_JWT_AUDIENCE:-it-guardian-services}
@@ -36,10 +33,128 @@ services:
       GATEWAY_DEFAULT_TIMEOUT_SECONDS: ${GATEWAY_DEFAULT_TIMEOUT_SECONDS:-10}
       GATEWAY_MAX_REQUEST_ID_LENGTH: ${GATEWAY_MAX_REQUEST_ID_LENGTH:-128}
       GATEWAY_MAX_HEADER_BYTES: ${GATEWAY_MAX_HEADER_BYTES:-32768}
-    ports:
-      - "127.0.0.1:${GATEWAY_PORT:-8080}:8000"
+    ports: ["127.0.0.1:${GATEWAY_PORT:-8080}:8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 20
+
+  agent-control-db-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on: {postgres: {condition: service_healthy}}
+    environment: {PGHOST: postgres, PGUSER: "${POSTGRES_USER:-guardian}", PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}", TARGET_DB: "${AGENT_CONTROL_DB:-guardian_agent_control}"}
+    command: ["sh", "-ec", "case \"$$TARGET_DB\" in ''|*[!A-Za-z0-9_]*) exit 2;; esac; [ \"$$(psql -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$$TARGET_DB'\")\" = 1 ] || createdb \"$$TARGET_DB\""]
+  agent-control-migrate:
+    build: {context: ./services/agent-control-service}
+    restart: "no"
+    depends_on: {agent-control-db-init: {condition: service_completed_successfully}}
+    environment: {AGENT_CONTROL_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${AGENT_CONTROL_DB:-guardian_agent_control}"}
+    command: ["alembic", "upgrade", "head"]
+  agent-control-service:
+    build: {context: ./services/agent-control-service}
+    restart: unless-stopped
+    depends_on: {agent-control-migrate: {condition: service_completed_successfully}, nats: {condition: service_started}}
+    environment:
+      AGENT_CONTROL_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${AGENT_CONTROL_DB:-guardian_agent_control}
+      AGENT_CONTROL_NATS_URL: nats://nats:4222
+      AGENT_CONTROL_NATS_STREAM: GUARDIAN_EVENTS
+      AGENT_CONTROL_TRUSTED_PROXY_TOKEN: ${DEVICE_PROXY_SHARED_SECRET:?DEVICE_PROXY_SHARED_SECRET is required}
+      AGENT_CONTROL_OFFLINE_TIMEOUT_SECONDS: ${AGENT_CONTROL_OFFLINE_TIMEOUT_SECONDS:-180}
+    ports: ["127.0.0.1:${AGENT_CONTROL_PORT:-8007}:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  agent-control-outbox-worker:
+    build: {context: ./services/agent-control-service}
+    restart: unless-stopped
+    depends_on: {agent-control-migrate: {condition: service_completed_successfully}, nats: {condition: service_started}}
+    environment: {AGENT_CONTROL_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${AGENT_CONTROL_DB:-guardian_agent_control}", AGENT_CONTROL_NATS_URL: "nats://nats:4222", AGENT_CONTROL_NATS_STREAM: "GUARDIAN_EVENTS"}
+    command: ["python", "-m", "app.outbox_worker"]
+  agent-control-offline-worker:
+    build: {context: ./services/agent-control-service}
+    restart: unless-stopped
+    depends_on: {agent-control-migrate: {condition: service_completed_successfully}}
+    environment: {AGENT_CONTROL_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${AGENT_CONTROL_DB:-guardian_agent_control}", AGENT_CONTROL_OFFLINE_TIMEOUT_SECONDS: "${AGENT_CONTROL_OFFLINE_TIMEOUT_SECONDS:-180}"}
+    command: ["python", "-m", "app.offline_worker"]
+
+  command-db-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on: {postgres: {condition: service_healthy}}
+    environment: {PGHOST: postgres, PGUSER: "${POSTGRES_USER:-guardian}", PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}", TARGET_DB: "${COMMAND_DB:-guardian_command}"}
+    command: ["sh", "-ec", "case \"$$TARGET_DB\" in ''|*[!A-Za-z0-9_]*) exit 2;; esac; [ \"$$(psql -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$$TARGET_DB'\")\" = 1 ] || createdb \"$$TARGET_DB\""]
+  command-migrate:
+    build: {context: ./services/command-service}
+    restart: "no"
+    depends_on: {command-db-init: {condition: service_completed_successfully}}
+    environment: {COMMAND_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${COMMAND_DB:-guardian_command}"}
+    command: ["alembic", "upgrade", "head"]
+  command-service:
+    build: {context: ./services/command-service}
+    restart: unless-stopped
+    depends_on: {command-migrate: {condition: service_completed_successfully}, identity-service: {condition: service_healthy}, asset-service: {condition: service_healthy}, agent-control-service: {condition: service_healthy}, nats: {condition: service_started}}
+    environment:
+      COMMAND_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${COMMAND_DB:-guardian_command}
+      COMMAND_IDENTITY_JWKS_URL: http://identity-service:8000/.well-known/jwks.json
+      COMMAND_IDENTITY_ISSUER: ${IDENTITY_JWT_ISSUER:-urn:it-guardian:identity}
+      COMMAND_IDENTITY_AUDIENCE: ${IDENTITY_JWT_AUDIENCE:-it-guardian-services}
+      COMMAND_ASSET_SERVICE_URL: http://asset-service:8000
+      COMMAND_AGENT_CONTROL_SERVICE_URL: http://agent-control-service:8000
+      COMMAND_TRUSTED_PROXY_TOKEN: ${DEVICE_PROXY_SHARED_SECRET:?DEVICE_PROXY_SHARED_SECRET is required}
+      COMMAND_NATS_URL: nats://nats:4222
+      COMMAND_NATS_STREAM: GUARDIAN_EVENTS
+    ports: ["127.0.0.1:${COMMAND_PORT:-8008}:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  command-outbox-worker:
+    build: {context: ./services/command-service}
+    restart: unless-stopped
+    depends_on: {command-migrate: {condition: service_completed_successfully}, nats: {condition: service_started}}
+    environment: {COMMAND_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${COMMAND_DB:-guardian_command}", COMMAND_NATS_URL: "nats://nats:4222", COMMAND_NATS_STREAM: "GUARDIAN_EVENTS"}
+    command: ["python", "-m", "app.outbox_worker"]
+
+  telemetry-db-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on: {postgres: {condition: service_healthy}}
+    environment: {PGHOST: postgres, PGUSER: "${POSTGRES_USER:-guardian}", PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}", TARGET_DB: "${TELEMETRY_DB:-guardian_telemetry}"}
+    command: ["sh", "-ec", "case \"$$TARGET_DB\" in ''|*[!A-Za-z0-9_]*) exit 2;; esac; [ \"$$(psql -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$$TARGET_DB'\")\" = 1 ] || createdb \"$$TARGET_DB\""]
+  telemetry-migrate:
+    build: {context: ./services/telemetry-service}
+    restart: "no"
+    depends_on: {telemetry-db-init: {condition: service_completed_successfully}}
+    environment: {TELEMETRY_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${TELEMETRY_DB:-guardian_telemetry}"}
+    command: ["alembic", "upgrade", "head"]
+  telemetry-service:
+    build: {context: ./services/telemetry-service}
+    restart: unless-stopped
+    depends_on: {telemetry-migrate: {condition: service_completed_successfully}, identity-service: {condition: service_healthy}, asset-service: {condition: service_healthy}, agent-control-service: {condition: service_healthy}, nats: {condition: service_started}}
+    environment:
+      TELEMETRY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${TELEMETRY_DB:-guardian_telemetry}
+      TELEMETRY_IDENTITY_JWKS_URL: http://identity-service:8000/.well-known/jwks.json
+      TELEMETRY_IDENTITY_ISSUER: ${IDENTITY_JWT_ISSUER:-urn:it-guardian:identity}
+      TELEMETRY_IDENTITY_AUDIENCE: ${IDENTITY_JWT_AUDIENCE:-it-guardian-services}
+      TELEMETRY_ASSET_SERVICE_URL: http://asset-service:8000
+      TELEMETRY_AGENT_CONTROL_SERVICE_URL: http://agent-control-service:8000
+      TELEMETRY_TRUSTED_PROXY_TOKEN: ${DEVICE_PROXY_SHARED_SECRET:?DEVICE_PROXY_SHARED_SECRET is required}
+      TELEMETRY_NATS_URL: nats://nats:4222
+      TELEMETRY_NATS_STREAM: GUARDIAN_EVENTS
+    ports: ["127.0.0.1:${TELEMETRY_PORT:-8009}:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  telemetry-outbox-worker:
+    build: {context: ./services/telemetry-service}
+    restart: unless-stopped
+    depends_on: {telemetry-migrate: {condition: service_completed_successfully}, nats: {condition: service_started}}
+    environment: {TELEMETRY_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${TELEMETRY_DB:-guardian_telemetry}", TELEMETRY_NATS_URL: "nats://nats:4222", TELEMETRY_NATS_STREAM: "GUARDIAN_EVENTS"}
+    command: ["python", "-m", "app.outbox_worker"]
