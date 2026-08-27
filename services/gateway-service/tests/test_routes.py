@@ -15,8 +15,6 @@ def settings() -> Settings:
         enrollment_service_url="http://enrollment-service:8000",
         pki_service_url="http://pki-service:8000",
         audit_service_url="http://audit-service:8000",
-        command_service_url="http://command-service:8000",
-        telemetry_service_url="http://telemetry-service:8000",
     )
 
 
@@ -29,7 +27,7 @@ def test_initial_registry_is_explicit_unique_and_contains_no_catchall():
     northbound = [policy for policy in policies if policy.auth_mode != AuthMode.INTERNAL_ONLY]
     internal = [policy for policy in policies if policy.auth_mode == AuthMode.INTERNAL_ONLY]
 
-    assert len(northbound) == 39
+    assert len(northbound) == 34
     assert len(internal) == 7
     assert len({policy.route_id for policy in policies}) == len(policies)
     assert len({(policy.method, policy.path_template) for policy in policies}) == len(policies)
@@ -56,39 +54,6 @@ def test_known_static_and_dynamic_routes_resolve_to_fixed_upstreams():
     assert asset.policy.route_id == "asset.get"
     assert asset.policy.upstream_base_url == "http://asset-service:8000"
     assert asset.path_params == {"asset_id": "asset-123"}
-
-
-def test_v06_admin_routes_are_explicit_and_device_routes_stay_off_gateway():
-    routes = registry()
-
-    create_command = routes.require_northbound("POST", "/api/v1/commands").policy
-    assert create_command.route_id == "command.create"
-    assert create_command.upstream_base_url == "http://command-service:8000"
-    assert create_command.auth_mode == AuthMode.IDENTITY
-    assert create_command.mutation is True
-    assert create_command.audit_intent_required is True
-
-    command = routes.require_northbound("GET", "/api/v1/commands/cmd-123").policy
-    assert command.route_id == "command.get"
-    assert command.auth_mode == AuthMode.IDENTITY
-
-    telemetry = routes.require_northbound("GET", "/api/v1/telemetry/devices/dev-123/latest").policy
-    assert telemetry.route_id == "telemetry.latest"
-    assert telemetry.upstream_base_url == "http://telemetry-service:8000"
-    assert telemetry.auth_mode == AuthMode.IDENTITY
-    assert telemetry.mutation is False
-
-    for method, path in (
-        ("POST", "/api/v1/device/heartbeat"),
-        ("POST", "/api/v1/device/commands/acquire"),
-        ("POST", "/api/v1/device/commands/cmd-123/running"),
-        ("POST", "/api/v1/device/commands/cmd-123/result"),
-        ("POST", "/api/v1/device/telemetry"),
-    ):
-        assert routes.match(method, path) is None
-        with pytest.raises(GatewayError) as raised:
-            routes.require_northbound(method, path)
-        assert raised.value.code == "gateway.route_not_allowed"
 
 
 def test_internal_only_and_unknown_routes_are_not_northbound():
