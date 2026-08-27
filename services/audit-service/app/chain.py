@@ -166,6 +166,11 @@ def append_record(session: Session, entry: AuditEntry) -> tuple[AuditRecord, boo
 
 
 def verify_chain(session: Session, chain_key: str) -> ChainVerification:
+    # Read one stable chain state. Appenders use the same transaction-scoped
+    # advisory lock, so a verification cannot observe records from one state
+    # and a chain head from a later state.
+    _lock_key(session, f"audit-chain:{chain_key}")
+
     records = list(
         session.scalars(
             select(AuditRecord)
