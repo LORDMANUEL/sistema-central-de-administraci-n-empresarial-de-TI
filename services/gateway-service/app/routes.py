@@ -156,7 +156,6 @@ def build_route_policies(settings: Settings) -> list[RoutePolicy]:
         )
 
     routes = [
-        # Identity — bootstrap/login/refresh are intentionally public at the edge.
         policy("identity.bootstrap", "POST", "/api/v1/auth/bootstrap", identity, auth=AuthMode.PUBLIC, timeout=10, bucket="auth-bootstrap"),
         policy("identity.login", "POST", "/api/v1/auth/login", identity, auth=AuthMode.PUBLIC, timeout=10, bucket="auth-login"),
         policy("identity.refresh", "POST", "/api/v1/auth/refresh", identity, auth=AuthMode.PUBLIC, timeout=10, bucket="auth-login"),
@@ -165,7 +164,8 @@ def build_route_policies(settings: Settings) -> list[RoutePolicy]:
         policy("identity.user.list", "GET", "/api/v1/users", identity, auth=AuthMode.IDENTITY),
         policy("identity.user.status", "PATCH", "/api/v1/users/{user_id}/status", identity, auth=AuthMode.IDENTITY, mutation=True),
 
-        # Tenant — initial tenant creation remains break-glass/direct in v0.5.
+        # Tenant creation is a platform-admin mutation and is audit-intent fail-closed.
+        policy("tenant.create", "POST", "/api/v1/tenants", tenant, auth=AuthMode.IDENTITY, mutation=True),
         policy("tenant.list", "GET", "/api/v1/tenants", tenant, auth=AuthMode.IDENTITY),
         policy("tenant.get", "GET", "/api/v1/tenants/{tenant_id}", tenant, auth=AuthMode.IDENTITY),
         policy("tenant.update", "PATCH", "/api/v1/tenants/{tenant_id}", tenant, auth=AuthMode.IDENTITY, mutation=True),
@@ -179,13 +179,11 @@ def build_route_policies(settings: Settings) -> list[RoutePolicy]:
         policy("tenant.department.list", "GET", "/api/v1/tenants/{tenant_id}/departments", tenant, auth=AuthMode.IDENTITY),
         policy("tenant.department.update", "PATCH", "/api/v1/tenants/{tenant_id}/departments/{department_id}", tenant, auth=AuthMode.IDENTITY, mutation=True),
 
-        # Asset.
         policy("asset.create", "POST", "/api/v1/assets", asset, auth=AuthMode.IDENTITY, mutation=True),
         policy("asset.list", "GET", "/api/v1/assets", asset, auth=AuthMode.IDENTITY),
         policy("asset.get", "GET", "/api/v1/assets/{asset_id}", asset, auth=AuthMode.IDENTITY),
         policy("asset.external_identity.link", "POST", "/api/v1/assets/{asset_id}/external-identities", asset, auth=AuthMode.IDENTITY, mutation=True),
 
-        # Enrollment administrative API plus endpoint enrollment.
         policy("enrollment.token.create", "POST", "/api/v1/enrollment-tokens", enrollment, auth=AuthMode.IDENTITY, mutation=True),
         policy("enrollment.token.list", "GET", "/api/v1/enrollment-tokens", enrollment, auth=AuthMode.IDENTITY),
         policy("enrollment.token.revoke", "POST", "/api/v1/enrollment-tokens/{token_id}/revoke", enrollment, auth=AuthMode.IDENTITY, mutation=True),
@@ -193,16 +191,12 @@ def build_route_policies(settings: Settings) -> list[RoutePolicy]:
         policy("enrollment.get", "GET", "/api/v1/enrollments/{device_id}", enrollment, auth=AuthMode.IDENTITY),
         policy("enrollment.device.enroll", "POST", "/api/v1/enrollments", enrollment, auth=AuthMode.ENROLLMENT_TOKEN, mutation=True, audit_required=False, max_body=256 * 1024, timeout=30, bucket="endpoint-enrollment"),
 
-        # Audit is read-only northbound.
         policy("audit.records.list", "GET", "/api/v1/audit/records", audit, auth=AuthMode.IDENTITY),
         policy("audit.record.get", "GET", "/api/v1/audit/records/{record_id}", audit, auth=AuthMode.IDENTITY),
         policy("audit.verify", "GET", "/api/v1/audit/verify", audit, auth=AuthMode.IDENTITY),
 
-        # CRL is intentionally public metadata; signing operations remain internal.
         policy("pki.crl", "GET", "/api/v1/ca/crl", pki, auth=AuthMode.PUBLIC, timeout=10, bucket="public-read"),
 
-        # Internal-only registry entries. These can be resolved by trusted server code,
-        # but RouteRegistry never returns them for northbound matching.
         policy("tenant.access.internal", "GET", "/api/v1/tenants/{tenant_id}/access", tenant, auth=AuthMode.INTERNAL_ONLY),
         policy("pki.issue.internal", "POST", "/api/v1/certificates/issue", pki, auth=AuthMode.INTERNAL_ONLY, mutation=True, audit_required=False),
         policy("pki.certificates.list.internal", "GET", "/api/v1/certificates", pki, auth=AuthMode.INTERNAL_ONLY),
@@ -212,9 +206,7 @@ def build_route_policies(settings: Settings) -> list[RoutePolicy]:
         policy("enrollment.jwks.internal", "GET", "/_internal/enrollment/.well-known/jwks.json", enrollment, auth=AuthMode.INTERNAL_ONLY, upstream_path="/.well-known/jwks.json"),
     ]
 
-    # The registry is intentionally small and reviewed. A changed count is a security
-    # decision and must update the tests/spec rather than silently widening exposure.
-    if len([item for item in routes if item.auth_mode != AuthMode.INTERNAL_ONLY]) != 33:
+    if len([item for item in routes if item.auth_mode != AuthMode.INTERNAL_ONLY]) != 34:
         raise AssertionError("unexpected northbound route count")
     if len([item for item in routes if item.auth_mode == AuthMode.INTERNAL_ONLY]) != 7:
         raise AssertionError("unexpected internal-only route count")
