@@ -290,7 +290,7 @@ def main() -> None:
 
     metrics_status, metrics, _ = request("GET", "/metrics")
     assert metrics_status == 200
-    assert "it_guardian_gateway_requests_total" in metrics, metrics[:500]
+    assert "guardian_gateway_requests_total" in metrics, metrics[:500]
 
     serialized_audit = json.dumps(records, sort_keys=True)
     assert SECRET_MARKER not in serialized_audit
