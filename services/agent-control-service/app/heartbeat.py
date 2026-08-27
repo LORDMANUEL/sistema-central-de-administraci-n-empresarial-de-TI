@@ -3,12 +3,17 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from .events import device_event
 from .models import DeviceCapabilitySnapshot, DeviceSession
 from .principal import DevicePrincipal
 from .schemas import HeartbeatInput
 
 
 class DeviceBindingConflict(RuntimeError):
+    pass
+
+
+class DeviceDisabled(RuntimeError):
     pass
 
 
@@ -23,12 +28,7 @@ def _normalize_capabilities(values: list[str]) -> list[str]:
     return sorted(set(values))
 
 
-def apply_heartbeat(
-    session: Session,
-    principal: DevicePrincipal,
-    payload: HeartbeatInput,
-    now: datetime,
-) -> HeartbeatOutcome:
+def apply_heartbeat(session: Session, principal: DevicePrincipal, payload: HeartbeatInput, now: datetime) -> HeartbeatOutcome:
     normalized = _normalize_capabilities(payload.capabilities)
     current = session.get(DeviceSession, principal.device_id)
 
@@ -49,23 +49,19 @@ def apply_heartbeat(
         )
         session.add(current)
         session.flush()
-        session.add(
-            DeviceCapabilitySnapshot(
-                device_id=principal.device_id,
-                capability_version=payload.capability_version,
-                capabilities=normalized,
-                created_at=now,
-            )
-        )
+        session.add(DeviceCapabilitySnapshot(device_id=principal.device_id, capability_version=payload.capability_version, capabilities=normalized, created_at=now))
+        session.add(device_event("device.online", tenant_id=principal.tenant_id, asset_id=principal.guardian_asset_id, device_id=principal.device_id, occurred_at=now, extra={"agent_version": payload.agent_version, "platform": payload.platform, "platform_version": payload.platform_version}))
+        session.add(device_event("device.capabilities.changed", tenant_id=principal.tenant_id, asset_id=principal.guardian_asset_id, device_id=principal.device_id, occurred_at=now, extra={"capability_version": payload.capability_version, "capabilities": normalized}))
         session.flush()
         return HeartbeatOutcome(state="online", online_transition=True, capabilities_changed=True)
 
     if current.tenant_id != principal.tenant_id or current.guardian_asset_id != principal.guardian_asset_id:
         raise DeviceBindingConflict("device_id is already bound to another tenant or asset")
+    if current.state == "disabled":
+        raise DeviceDisabled("device is administratively disabled")
 
     online_transition = current.state != "online"
     capabilities_changed = current.current_capabilities != normalized
-
     current.certificate_serial = principal.certificate_serial
     current.session_id = payload.session_id
     current.state = "online"
@@ -75,20 +71,12 @@ def apply_heartbeat(
     current.capability_version = payload.capability_version
     current.last_seen_at = now
 
+    if online_transition:
+        session.add(device_event("device.online", tenant_id=current.tenant_id, asset_id=current.guardian_asset_id, device_id=current.device_id, occurred_at=now, extra={"agent_version": payload.agent_version, "platform": payload.platform, "platform_version": payload.platform_version}))
     if capabilities_changed:
         current.current_capabilities = normalized
-        session.add(
-            DeviceCapabilitySnapshot(
-                device_id=principal.device_id,
-                capability_version=payload.capability_version,
-                capabilities=normalized,
-                created_at=now,
-            )
-        )
+        session.add(DeviceCapabilitySnapshot(device_id=principal.device_id, capability_version=payload.capability_version, capabilities=normalized, created_at=now))
+        session.add(device_event("device.capabilities.changed", tenant_id=current.tenant_id, asset_id=current.guardian_asset_id, device_id=current.device_id, occurred_at=now, extra={"capability_version": payload.capability_version, "capabilities": normalized}))
 
     session.flush()
-    return HeartbeatOutcome(
-        state="online",
-        online_transition=online_transition,
-        capabilities_changed=capabilities_changed,
-    )
+    return HeartbeatOutcome(state="online", online_transition=online_transition, capabilities_changed=capabilities_changed)
