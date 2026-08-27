@@ -29,8 +29,12 @@ def _map_runtime(exc):
 @router.post("/commands",response_model=CommandRead,status_code=status.HTTP_201_CREATED)
 def create(payload:CommandCreate,request:Request,session:Session=Depends(get_db),principal:IdentityPrincipal=Depends(current_principal)):
     tenant_id=request.app.state.core_validator.validate_target(payload.guardian_asset_id,payload.device_id,principal.bearer_token)
-    try: command=create_command(session,ActorPrincipal(tenant_id,UUID(principal.user_id)),payload,datetime.now(UTC));session.commit();session.refresh(command);return command
-    except IdempotencyConflict as exc:session.rollback();raise GuardianError(409,"command.idempotency_conflict",str(exc)) from exc
+    if payload.tenant_id is not None and payload.tenant_id != tenant_id:
+        raise GuardianError(409,"command.tenant_assertion_mismatch","Command tenant assertion does not match authoritative target tenant")
+    try:
+        command=create_command(session,ActorPrincipal(tenant_id,UUID(principal.user_id)),payload,datetime.now(UTC));session.commit();session.refresh(command);return command
+    except IdempotencyConflict as exc:
+        session.rollback();raise GuardianError(409,"command.idempotency_conflict",str(exc)) from exc
 
 @router.get("/commands/{command_id}",response_model=CommandRead)
 def get(command_id:UUID,request:Request,session:Session=Depends(get_db),principal:IdentityPrincipal=Depends(current_principal)):
@@ -39,12 +43,12 @@ def get(command_id:UUID,request:Request,session:Session=Depends(get_db),principa
     request.app.state.core_validator.validate_target(command.guardian_asset_id,command.device_id,principal.bearer_token);return command
 
 @router.get("/commands",response_model=list[CommandRead])
-def list_commands(request:Request,device_id:UUID|None=None,state:str|None=None,limit:int=50,session:Session=Depends(get_db),principal:IdentityPrincipal=Depends(current_principal)):
-    limit=max(1,min(limit,100)); stmt=select(Command)
+def list_commands(request:Request,tenant_id:UUID|None=None,device_id:UUID|None=None,state:str|None=None,limit:int=50,session:Session=Depends(get_db),principal:IdentityPrincipal=Depends(current_principal)):
+    limit=max(1,min(limit,100));stmt=select(Command)
+    if tenant_id:stmt=stmt.where(Command.tenant_id==tenant_id)
     if device_id:stmt=stmt.where(Command.device_id==device_id)
     if state:stmt=stmt.where(Command.state==state)
-    rows=session.execute(stmt.order_by(Command.created_at.desc()).limit(limit)).scalars().all()
-    visible=[]
+    rows=session.execute(stmt.order_by(Command.created_at.desc()).limit(limit)).scalars().all();visible=[]
     for command in rows:
         try:request.app.state.core_validator.validate_target(command.guardian_asset_id,command.device_id,principal.bearer_token);visible.append(command)
         except GuardianError as exc:
@@ -60,7 +64,7 @@ def cancel(command_id:UUID,request:Request,session:Session=Depends(get_db),princ
     command.state="cancelled";session.add(command_event("command.cancelled",command_id=command.command_id,tenant_id=command.tenant_id,asset_id=command.guardian_asset_id,device_id=command.device_id,occurred_at=datetime.now(UTC),extra={"actor_user_id":principal.user_id}));session.commit();return command
 
 @router.post("/device/commands/acquire")
-def acquire(request:Request,limit:int=10,session:Session=Depends(get_db),principal:DevicePrincipal=Depends(current_device_principal)):
+def acquire(limit:int=10,session:Session=Depends(get_db),principal:DevicePrincipal=Depends(current_device_principal)):
     items=acquire_commands(session,principal,datetime.now(UTC),limit=limit);session.commit();return [{"command_id":str(x.command_id),"command_type":x.command_type,"arguments":x.arguments,"execution_token":x.execution_token,"lease_expires_at":x.lease_expires_at.isoformat(),"expires_at":x.expires_at.isoformat()} for x in items]
 
 @router.post("/device/commands/{command_id}/running")
