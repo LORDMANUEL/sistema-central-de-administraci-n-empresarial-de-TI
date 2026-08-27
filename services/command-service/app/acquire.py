@@ -63,7 +63,7 @@ def acquire_commands(
             Command.state == "queued",
             Command.expires_at > now,
         )
-        .order_by(Command.created_at.asc(), Command.command_id.asc())
+        .order_by(Command.created_at.asc())
         .limit(effective_limit)
         .with_for_update(skip_locked=True)
     ).scalars().all()
