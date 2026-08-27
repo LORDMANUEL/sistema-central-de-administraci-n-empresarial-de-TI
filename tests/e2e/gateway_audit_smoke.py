@@ -271,7 +271,8 @@ def main() -> None:
         rate_statuses.append(status)
     assert rate_statuses[:5] == [401] * 5, rate_statuses
     assert rate_statuses[5] == 429, rate_statuses
-    assert int(headers.get("Retry-After", "0")) >= 1, headers
+    retry_after = next((value for key, value in headers.items() if key.lower() == "retry-after"), "0")
+    assert int(retry_after) >= 1, headers
 
     accepted, completed, records = wait_for_gateway_audit_pair(
         tenant_id,
