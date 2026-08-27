@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
@@ -11,9 +11,7 @@ class Base(DeclarativeBase):
 
 class Command(Base):
     __tablename__ = "commands"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "idempotency_key", name="uq_commands_tenant_idempotency"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", "idempotency_key", name="uq_commands_tenant_idempotency"),)
 
     command_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
@@ -34,14 +32,10 @@ class Command(Base):
 
 class CommandResult(Base):
     __tablename__ = "command_results"
-    __table_args__ = (
-        UniqueConstraint("command_id", "result_sequence", name="uq_command_result_sequence"),
-    )
+    __table_args__ = (UniqueConstraint("command_id", "result_sequence", name="uq_command_result_sequence"),)
 
     result_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
-    command_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("commands.command_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    command_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("commands.command_id", ondelete="CASCADE"), nullable=False, index=True)
     result_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -50,3 +44,16 @@ class CommandResult(Base):
     finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OutboxEvent(Base):
+    __tablename__ = "outbox_events"
+
+    event_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    subject: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    aggregate_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
