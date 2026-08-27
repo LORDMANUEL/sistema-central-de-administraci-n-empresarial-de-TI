@@ -6,10 +6,12 @@ IT Guardian está construido como una plataforma de microservicios independiente
 
 ## Estado real del proyecto
 
-**Versión estable en `main`: `0.5.0`**  
-**Core estable:** Identity + Tenant + Asset + Enrollment + PKI + Gateway + Audit  
-**Gate activo:** `v0.6.0 — Agent Control + Command + Telemetry` en PR #8 (draft)  
-**Producto final instalable con agente:** todavía NO; falta cerrar v0.6, construir Windows Agent v0.7 y Web Console v0.8.
+**Versión estable en `main`: `0.6.0`**  
+**Core estable:** Identity + Tenant + Asset + Enrollment + PKI + Gateway + Audit + Agent Control + Command + Telemetry  
+**Gate activo:** `v0.7.0 — Windows Agent Modern`  
+**Producto final instalable con consola:** todavía NO; el servidor y plano de operaciones de endpoint ya están certificados, pero falta el Windows Agent v0.7 y la Web Console v0.8.
+
+La v0.6.0 fue certificada con dos clean-stack independientes desde volúmenes vacíos, incluyendo enrollment real, identidad de dispositivo, heartbeat, `device.online`, lifecycle completo de comandos, resultado idempotente, telemetry dedupe/latest, recuperación de outbox tras caída de NATS, Audit y aislamiento de secretos/runtime no-root.
 
 ### Matriz de avance
 
@@ -23,10 +25,10 @@ IT Guardian está construido como una plataforma de microservicios independiente
 | PKI Service | ✅ TERMINADO | v0.4.0/main | CA, certificados, revocación, CRL, rotación |
 | Gateway Service | ✅ TERMINADO | v0.5.0/main | borde HTTP, allowlist, rate limits, header sanitization |
 | Audit Service | ✅ TERMINADO | v0.5.0/main | append-only, hash chain, dedupe, consulta y verificación |
-| Agent Control | 🟡 EN DESARROLLO | PR #8 | heartbeat/capabilities/offline; falta cierre operativo completo |
-| Command Service | 🟡 EN DESARROLLO | PR #8 | allowlist/idempotencia/adquisición en construcción |
-| Telemetry Service | 🟡 EN DESARROLLO | PR #8 | dominio inicial implementado; falta cierre operativo completo |
-| Windows Agent Modern | ⬜ PENDIENTE | v0.7.0 | primer binario de endpoint administrable |
+| Agent Control | ✅ TERMINADO | v0.6.0/main | heartbeat, capacidades, online/offline, outbox |
+| Command Service | ✅ TERMINADO | v0.6.0/main | jobs tipados, idempotencia, adquisición, leases y resultados |
+| Telemetry Service | ✅ TERMINADO | v0.6.0/main | ingestión acotada, dedupe y latest read |
+| Windows Agent Modern | 🟡 SIGUIENTE GATE | v0.7.0 | primer binario de endpoint administrable |
 | Web Console MVP | ⬜ PENDIENTE | v0.8.0 | administración visual del core |
 | Software/Patch/Policy | ⬜ PENDIENTE | v0.9.0 | RMM básico |
 | Tickets + Help Client | ⬜ PENDIENTE | v0.10.0 | soporte empresarial |
@@ -64,7 +66,7 @@ Web Console
 
 No se deben adelantar módulos secundarios mientras esta cadena no sea utilizable de punta a punta.
 
-## Core estable v0.5.0
+## Core estable v0.6.0
 
 ### Identity Service — :8001
 
@@ -122,6 +124,36 @@ No se deben adelantar módulos secundarios mientras esta cadena no sea utilizabl
 - consulta administrativa tenant-scoped;
 - secret-safe metadata.
 
+### Agent Control Service — :8007
+
+- heartbeat autenticado por principal normalizado de dispositivo;
+- registro de `agent_version`, plataforma, capacidades y versión de capacidades;
+- transición online y detección offline;
+- eventos `device.online`, `device.offline` y `device.capabilities.changed`;
+- transactional outbox + JetStream;
+- BD `guardian_agent_control` independiente.
+
+### Command Service — :8008
+
+- catálogo de comandos tipados; no shell arbitrario;
+- creación administrativa tenant/device scoped;
+- idempotency key;
+- adquisición por dispositivo con lease y execution token;
+- estados queued/acquired/running/terminal;
+- resultado idempotente y protección cross-device;
+- cancelación administrativa;
+- eventos de lifecycle por outbox/JetStream;
+- BD `guardian_command` independiente.
+
+### Telemetry Service — :8009
+
+- ingestión de batches acotados;
+- dedupe por `batch_id`;
+- almacenamiento de muestras normalizadas;
+- lectura administrativa `latest` por dispositivo;
+- eventos `telemetry.batch.accepted` por outbox/JetStream;
+- BD `guardian_telemetry` independiente.
+
 ### Gateway Service — :8080
 
 - borde HTTP controlado;
@@ -131,7 +163,30 @@ No se deben adelantar módulos secundarios mientras esta cadena no sea utilizabl
 - límites de body/header y rate limiting;
 - mutaciones sin retry automático;
 - auditoría fail-closed antes de mutaciones administrativas;
-- sanitización de respuesta upstream.
+- sanitización de respuesta upstream;
+- rutas administrativas v0.6 para Command y Telemetry;
+- **no expone las rutas de dispositivo** `/api/v1/device/*` en el plano bearer-admin.
+
+## Plano de dispositivo v0.6
+
+El tráfico del endpoint no reutiliza la autenticación administrativa del Gateway. El borde de dispositivo normaliza una identidad confiable antes de llegar a Agent Control, Command o Telemetry.
+
+Identidad normalizada:
+
+- `tenant_id`;
+- `guardian_asset_id`;
+- `device_id`;
+- serial del certificado de dispositivo.
+
+Operaciones certificadas:
+
+- `POST /api/v1/device/heartbeat`;
+- `POST /api/v1/device/commands/acquire`;
+- `POST /api/v1/device/commands/{command_id}/running`;
+- `POST /api/v1/device/commands/{command_id}/result`;
+- `POST /api/v1/device/telemetry`.
+
+En v0.7 el Windows Agent debe usar el certificado/clave generados en el endpoint y no depender de headers directamente controlables por un proceso no confiable.
 
 ## Seguridad de claves
 
@@ -141,7 +196,9 @@ No se deben adelantar módulos secundarios mientras esta cadena no sea utilizabl
 - PKI runtime monta únicamente la Intermediate online en read-only;
 - workers PKI/Enrollment no reciben material CA;
 - las private keys de dispositivos se generan y permanecen en el endpoint;
-- Gateway y Audit no reciben claves privadas de Identity/Enrollment/PKI.
+- Gateway y Audit no reciben claves privadas de Identity/Enrollment/PKI;
+- Agent Control, Command y Telemetry no reciben signing keys de Identity/Enrollment ni material de CA;
+- los eventos v0.6 usan envelope canónico compatible con Audit y `Nats-Msg-Id` para dedupe.
 
 ## Instalación estable actual
 
@@ -149,7 +206,7 @@ No se deben adelantar módulos secundarios mientras esta cadena no sea utilizabl
 
 - Linux, Windows con Docker Desktop/WSL2 o macOS con Docker Desktop;
 - Docker Engine/Compose v2;
-- puertos locales libres 8001-8006, 8080 y 8222 según configuración;
+- puertos locales libres 8001-8009, 8080 y 8222 según configuración;
 - almacenamiento persistente para PostgreSQL, NATS y PKI.
 
 ### Arranque
@@ -165,19 +222,21 @@ python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_b
 
 Use una en `IDENTITY_SIGNING_KEY` y otra en `ENROLLMENT_SIGNING_KEY`.
 
-5. Valide la configuración:
+5. Defina `DEVICE_PROXY_SHARED_SECRET` con un secreto aleatorio fuerte para el borde de dispositivo de laboratorio/staging. En producción v0.7 este canal deberá terminar en un componente que valide la identidad criptográfica del endpoint antes de normalizar el principal.
+
+6. Valide la configuración:
 
 ```bash
 docker compose config
 ```
 
-6. Inicie desde stack limpio:
+7. Inicie desde stack limpio:
 
 ```bash
 docker compose up -d --build
 ```
 
-7. Compruebe estado:
+8. Compruebe estado:
 
 ```bash
 docker compose ps
@@ -187,16 +246,35 @@ curl http://localhost:8003/health/ready
 curl http://localhost:8004/health/ready
 curl http://localhost:8005/health/ready
 curl http://localhost:8006/health/ready
+curl http://localhost:8007/health/ready
+curl http://localhost:8008/health/ready
+curl http://localhost:8009/health/ready
 curl http://localhost:8080/health/ready
 ```
 
-8. Cree el primer administrador una sola vez:
+9. Cree el primer administrador una sola vez:
 
 ```bash
 curl -X POST http://localhost:8001/api/v1/auth/bootstrap \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.com","display_name":"Platform Admin","password":"use-a-long-unique-password"}'
 ```
+
+### Certificación v0.6
+
+El workflow `.github/workflows/v06-core-ci.yml` exige dos ejecuciones clean-stack desde volúmenes vacíos y certifica:
+
+- modelo Compose efectivo con todos los servicios;
+- enrollment real y CSR;
+- heartbeat + `device.online` en Audit;
+- creación/adquisición/running/result de comando;
+- replay de resultado sin evento terminal duplicado;
+- bloqueo de resultado cross-device;
+- telemetry + dedupe + latest;
+- rutas de dispositivo no expuestas por Gateway admin;
+- persistencia de outbox durante caída de NATS y publicación posterior;
+- Audit chain válida y metadata secret-safe;
+- servicios v0.6 ejecutándose non-root sin signing keys ni CA privadas.
 
 ### Teardown de laboratorio
 
@@ -242,18 +320,18 @@ No se publicará un `.exe`, `.msi`, `.pkg`, `.deb`, `.rpm` o paquete móvil como
 
 Una instalación limpia debe poder, sin pasos manuales ocultos:
 
-- [ ] levantar todo el servidor;
-- [ ] crear/autenticar `platform_admin`;
-- [ ] crear empresa, sede, departamento y activo;
-- [ ] generar enrollment y certificado de dispositivo;
+- [x] levantar todo el servidor hasta v0.6;
+- [x] crear/autenticar `platform_admin`;
+- [x] crear empresa, sede, departamento y activo;
+- [x] generar enrollment y certificado de dispositivo;
 - [ ] instalar Windows Agent;
-- [ ] mostrar el dispositivo ONLINE;
-- [ ] recibir CPU/RAM/disco/SO e inventario;
-- [ ] ejecutar un comando permitido;
-- [ ] recibir resultado idempotente;
-- [ ] consultar la operación en Audit;
+- [x] aceptar heartbeat de un principal de dispositivo normalizado y mostrar estado ONLINE en el core;
+- [ ] recibir CPU/RAM/disco/SO e inventario desde el Windows Agent real;
+- [x] ejecutar el lifecycle de un comando permitido mediante simulador certificado;
+- [x] recibir resultado idempotente;
+- [x] consultar la operación en Audit;
 - [ ] administrar el flujo desde Web Console;
-- [ ] actualizar y hacer rollback sin destruir datos.
+- [ ] actualizar y hacer rollback del agente sin destruir datos.
 
 Hasta que todos estos puntos estén verdes, el proyecto seguirá siendo **core en construcción**, no v1 estable.
 
