@@ -114,6 +114,8 @@ def build_route_policies(settings: Settings) -> list[RoutePolicy]:
     enrollment = _validate_upstream_url(settings.enrollment_service_url)
     pki = _validate_upstream_url(settings.pki_service_url)
     audit = _validate_upstream_url(settings.audit_service_url)
+    command = _validate_upstream_url(settings.command_service_url)
+    telemetry = _validate_upstream_url(settings.telemetry_service_url)
 
     default_body = settings.default_max_body_bytes
     default_timeout = settings.default_timeout_seconds
@@ -164,7 +166,6 @@ def build_route_policies(settings: Settings) -> list[RoutePolicy]:
         policy("identity.user.list", "GET", "/api/v1/users", identity, auth=AuthMode.IDENTITY),
         policy("identity.user.status", "PATCH", "/api/v1/users/{user_id}/status", identity, auth=AuthMode.IDENTITY, mutation=True),
 
-        # Tenant creation is a platform-admin mutation and is audit-intent fail-closed.
         policy("tenant.create", "POST", "/api/v1/tenants", tenant, auth=AuthMode.IDENTITY, mutation=True),
         policy("tenant.list", "GET", "/api/v1/tenants", tenant, auth=AuthMode.IDENTITY),
         policy("tenant.get", "GET", "/api/v1/tenants/{tenant_id}", tenant, auth=AuthMode.IDENTITY),
@@ -197,6 +198,14 @@ def build_route_policies(settings: Settings) -> list[RoutePolicy]:
 
         policy("pki.crl", "GET", "/api/v1/ca/crl", pki, auth=AuthMode.PUBLIC, timeout=10, bucket="public-read"),
 
+        # v0.6 administrative endpoint-operations plane. Device endpoints deliberately
+        # remain outside Gateway bearer-admin routing and use the dedicated trusted edge.
+        policy("command.create", "POST", "/api/v1/commands", command, auth=AuthMode.IDENTITY, mutation=True),
+        policy("command.list", "GET", "/api/v1/commands", command, auth=AuthMode.IDENTITY),
+        policy("command.get", "GET", "/api/v1/commands/{command_id}", command, auth=AuthMode.IDENTITY),
+        policy("command.cancel", "POST", "/api/v1/commands/{command_id}/cancel", command, auth=AuthMode.IDENTITY, mutation=True),
+        policy("telemetry.latest", "GET", "/api/v1/telemetry/devices/{device_id}/latest", telemetry, auth=AuthMode.IDENTITY),
+
         policy("tenant.access.internal", "GET", "/api/v1/tenants/{tenant_id}/access", tenant, auth=AuthMode.INTERNAL_ONLY),
         policy("pki.issue.internal", "POST", "/api/v1/certificates/issue", pki, auth=AuthMode.INTERNAL_ONLY, mutation=True, audit_required=False),
         policy("pki.certificates.list.internal", "GET", "/api/v1/certificates", pki, auth=AuthMode.INTERNAL_ONLY),
@@ -206,7 +215,7 @@ def build_route_policies(settings: Settings) -> list[RoutePolicy]:
         policy("enrollment.jwks.internal", "GET", "/_internal/enrollment/.well-known/jwks.json", enrollment, auth=AuthMode.INTERNAL_ONLY, upstream_path="/.well-known/jwks.json"),
     ]
 
-    if len([item for item in routes if item.auth_mode != AuthMode.INTERNAL_ONLY]) != 34:
+    if len([item for item in routes if item.auth_mode != AuthMode.INTERNAL_ONLY]) != 39:
         raise AssertionError("unexpected northbound route count")
     if len([item for item in routes if item.auth_mode == AuthMode.INTERNAL_ONLY]) != 7:
         raise AssertionError("unexpected internal-only route count")
