@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import app.chain as chain_module
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
@@ -82,6 +83,29 @@ def test_duplicate_source_event_returns_existing_record_without_new_chain_link()
         assert created_two is False
         assert duplicate.id == first.id
         assert count == 1
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_verify_chain_serializes_against_concurrent_appends(monkeypatch):
+    tenant_id = "33333333-3333-3333-3333-333333333333"
+    chain_key = f"tenant:{tenant_id}"
+    engine, session = session_for_chain()
+    try:
+        append_record(session, entry("event-1", tenant_id=tenant_id))
+        session.commit()
+
+        acquired_locks: list[str] = []
+
+        def capture_lock(_session, value: str) -> None:
+            acquired_locks.append(value)
+
+        monkeypatch.setattr(chain_module, "_lock_key", capture_lock)
+        result = verify_chain(session, chain_key)
+
+        assert result.valid is True
+        assert acquired_locks == [f"audit-chain:{chain_key}"]
     finally:
         session.close()
         engine.dispose()
