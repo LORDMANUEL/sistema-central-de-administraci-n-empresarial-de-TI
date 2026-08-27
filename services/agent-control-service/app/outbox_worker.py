@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime
 
 import nats
+from nats.js.errors import NotFoundError
 from sqlalchemy import select
 
 from .config import get_settings
@@ -14,18 +15,27 @@ async def run_once():
     settings = get_settings()
     engine = build_engine(settings.database_url)
     factory = build_session_factory(engine)
-    nc = await nats.connect(settings.nats_url, connect_timeout=3)
+    nc = await nats.connect(settings.nats_url, connect_timeout=3, max_reconnect_attempts=-1)
     js = nc.jetstream()
     try:
         try:
-            await js.add_stream(name=settings.nats_stream, subjects=["device.*"])
-        except Exception:
-            pass
+            await js.stream_info(settings.nats_stream)
+        except NotFoundError:
+            await js.add_stream(name=settings.nats_stream, subjects=["guardian.>"])
         with factory() as session:
             rows = session.execute(select(OutboxEvent).where(OutboxEvent.published_at.is_(None)).order_by(OutboxEvent.created_at).limit(100)).scalars().all()
             for row in rows:
+                subject = f"guardian.{row.event_type}"
+                envelope = {
+                    "schema_version": 1,
+                    "event_id": str(row.event_id),
+                    "type": row.event_type,
+                    "aggregate_id": row.aggregate_id,
+                    "occurred_at": row.created_at.isoformat(),
+                    "data": row.payload,
+                }
                 try:
-                    await js.publish(row.event_type, json.dumps(row.payload, separators=(",", ":")).encode(), headers={"Nats-Msg-Id": str(row.event_id)})
+                    await js.publish(subject, json.dumps(envelope, separators=(",", ":"), sort_keys=True).encode(), headers={"Nats-Msg-Id": str(row.event_id)})
                     row.published_at = datetime.now(UTC)
                     row.last_error = None
                 except Exception as exc:
