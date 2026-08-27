@@ -1,0 +1,45 @@
+services:
+  gateway-service:
+    build:
+      context: ./services/gateway-service
+    restart: unless-stopped
+    depends_on:
+      nats:
+        condition: service_started
+      identity-service:
+        condition: service_healthy
+      tenant-service:
+        condition: service_healthy
+      asset-service:
+        condition: service_healthy
+      enrollment-service:
+        condition: service_healthy
+      pki-service:
+        condition: service_healthy
+      audit-service:
+        condition: service_healthy
+    environment:
+      GATEWAY_ENVIRONMENT: ${GUARDIAN_ENV:-production}
+      GATEWAY_IDENTITY_SERVICE_URL: http://identity-service:8000
+      GATEWAY_TENANT_SERVICE_URL: http://tenant-service:8000
+      GATEWAY_ASSET_SERVICE_URL: http://asset-service:8000
+      GATEWAY_ENROLLMENT_SERVICE_URL: http://enrollment-service:8000
+      GATEWAY_PKI_SERVICE_URL: http://pki-service:8000
+      GATEWAY_AUDIT_SERVICE_URL: http://audit-service:8000
+      GATEWAY_IDENTITY_JWKS_URL: http://identity-service:8000/.well-known/jwks.json
+      GATEWAY_IDENTITY_ISSUER: ${IDENTITY_JWT_ISSUER:-urn:it-guardian:identity}
+      GATEWAY_IDENTITY_AUDIENCE: ${IDENTITY_JWT_AUDIENCE:-it-guardian-services}
+      GATEWAY_NATS_URL: nats://nats:4222
+      GATEWAY_NATS_STREAM: GUARDIAN_EVENTS
+      GATEWAY_NATS_CONNECT_TIMEOUT_SECONDS: ${GATEWAY_NATS_CONNECT_TIMEOUT_SECONDS:-3}
+      GATEWAY_DEFAULT_MAX_BODY_BYTES: ${GATEWAY_DEFAULT_MAX_BODY_BYTES:-1048576}
+      GATEWAY_DEFAULT_TIMEOUT_SECONDS: ${GATEWAY_DEFAULT_TIMEOUT_SECONDS:-10}
+      GATEWAY_MAX_REQUEST_ID_LENGTH: ${GATEWAY_MAX_REQUEST_ID_LENGTH:-128}
+      GATEWAY_MAX_HEADER_BYTES: ${GATEWAY_MAX_HEADER_BYTES:-32768}
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
