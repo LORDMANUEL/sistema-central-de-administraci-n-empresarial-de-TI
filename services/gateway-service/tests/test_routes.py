@@ -27,7 +27,7 @@ def test_initial_registry_is_explicit_unique_and_contains_no_catchall():
     northbound = [policy for policy in policies if policy.auth_mode != AuthMode.INTERNAL_ONLY]
     internal = [policy for policy in policies if policy.auth_mode == AuthMode.INTERNAL_ONLY]
 
-    assert len(northbound) == 33
+    assert len(northbound) == 34
     assert len(internal) == 7
     assert len({policy.route_id for policy in policies}) == len(policies)
     assert len({(policy.method, policy.path_template) for policy in policies}) == len(policies)
@@ -38,6 +38,12 @@ def test_initial_registry_is_explicit_unique_and_contains_no_catchall():
 
 def test_known_static_and_dynamic_routes_resolve_to_fixed_upstreams():
     routes = registry()
+
+    create_tenant = routes.require_northbound("POST", "/api/v1/tenants")
+    assert create_tenant.policy.route_id == "tenant.create"
+    assert create_tenant.policy.auth_mode == AuthMode.IDENTITY
+    assert create_tenant.policy.mutation is True
+    assert create_tenant.policy.audit_intent_required is True
 
     tenants = routes.require_northbound("GET", "/api/v1/tenants")
     assert tenants.policy.route_id == "tenant.list"
@@ -70,7 +76,6 @@ def test_internal_only_and_unknown_routes_are_not_northbound():
         ("GET", "/api/v1/tenants/tenant-1/access"),
         ("POST", "/api/v1/certificates/issue"),
         ("GET", "/api/v1/not-a-real-route"),
-        ("POST", "/api/v1/tenants"),
     ):
         with pytest.raises(GatewayError) as raised:
             routes.require_northbound(method, path)
@@ -87,6 +92,12 @@ def test_route_security_profiles_are_declared_not_inferred_from_client_input():
     assert login.audit_intent_required is False
     assert login.timeout_seconds == 10
     assert login.rate_limit_bucket == "auth-login"
+
+    create_tenant = routes.require_northbound("POST", "/api/v1/tenants").policy
+    assert create_tenant.auth_mode == AuthMode.IDENTITY
+    assert create_tenant.mutation is True
+    assert create_tenant.audit_intent_required is True
+    assert create_tenant.rate_limit_bucket == "admin-write"
 
     create_user = routes.require_northbound("POST", "/api/v1/users").policy
     assert create_user.auth_mode == AuthMode.IDENTITY
