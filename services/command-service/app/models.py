@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Integer, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -30,3 +30,23 @@ class Command(Base):
     dispatch_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     execution_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CommandResult(Base):
+    __tablename__ = "command_results"
+    __table_args__ = (
+        UniqueConstraint("command_id", "result_sequence", name="uq_command_result_sequence"),
+    )
+
+    result_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    command_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("commands.command_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    result_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    summary: Mapped[str] = mapped_column(String(2048), nullable=False, default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
