@@ -1,0 +1,122 @@
+name: v0.6 Core Certification
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "release/**"]
+    paths:
+      - "services/**"
+      - "tests/e2e/**"
+      - "compose.yaml"
+      - "compose.override.yaml"
+      - ".env.example"
+      - ".github/workflows/v06-core-ci.yml"
+  pull_request:
+    paths:
+      - "services/**"
+      - "tests/e2e/**"
+      - "compose.yaml"
+      - "compose.override.yaml"
+      - ".env.example"
+      - ".github/workflows/v06-core-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  clean-stack-v06:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      POSTGRES_PASSWORD: ci-password-not-for-production
+      IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+      ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
+      GUARDIAN_ENV: production
+      GATEWAY_PORT: 8080
+      AGENT_CONTROL_PORT: 8007
+      COMMAND_PORT: 8008
+      TELEMETRY_PORT: 8009
+      DEVICE_PROXY_SHARED_SECRET: v06-ci-device-proxy-secret-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate effective v0.6 Compose model
+        run: |
+          docker compose config --quiet
+          services="$(docker compose config --services)"
+          for required in \
+            identity-service tenant-service asset-service enrollment-service pki-service \
+            gateway-service audit-service agent-control-service command-service telemetry-service; do
+            grep -Fx "$required" <<<"$services"
+          done
+
+      - name: Ensure empty volumes before first certification
+        run: docker compose down -v --remove-orphans || true
+
+      - name: Build and start complete Guardian v0.6 stack
+        run: docker compose up -d --build
+
+      - name: Certify endpoint operations core
+        run: python tests/e2e/v06_agent_command_telemetry_smoke.py
+
+      - name: Verify v0.6 runtime isolation and non-root execution
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+
+          services = (
+              "agent-control-service",
+              "agent-control-outbox-worker",
+              "agent-control-offline-worker",
+              "command-service",
+              "command-outbox-worker",
+              "telemetry-service",
+              "telemetry-outbox-worker",
+          )
+          forbidden_prefixes = (
+              "IDENTITY_SIGNING_KEY=",
+              "ENROLLMENT_SIGNING_KEY=",
+              "PKI_CA_KEY_PATH=",
+              "PKI_CA_ROOT_DIR=",
+              "PKI_CA_ONLINE_DIR=",
+          )
+          forbidden_mounts = {"/var/lib/guardian/pki-root", "/var/lib/guardian/pki"}
+
+          for service in services:
+              container_id = subprocess.check_output(
+                  ["docker", "compose", "ps", "-q", service], text=True
+              ).strip()
+              assert container_id, f"missing running container for {service}"
+              uid = subprocess.check_output(
+                  ["docker", "compose", "exec", "-T", service, "id", "-u"],
+                  text=True,
+              ).strip()
+              assert uid != "0", f"{service} is running as root"
+
+              inspected = json.loads(
+                  subprocess.check_output(["docker", "inspect", container_id], text=True)
+              )[0]
+              env = inspected["Config"]["Env"]
+              assert not any(value.startswith(forbidden_prefixes) for value in env), (service, env)
+              mounts = {item["Destination"] for item in inspected["Mounts"]}
+              assert not (mounts & forbidden_mounts), (service, mounts)
+          PY
+
+      - name: Tear down first certification completely
+        run: docker compose down -v --remove-orphans
+
+      - name: Start second clean-stack certification
+        run: docker compose up -d --build
+
+      - name: Certify endpoint operations core a second time
+        run: python tests/e2e/v06_agent_command_telemetry_smoke.py
+
+      - name: Dump v0.6 clean-stack state on failure
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=1200
+
+      - name: Tear down containers and volumes
+        if: always()
+        run: docker compose down -v --remove-orphans

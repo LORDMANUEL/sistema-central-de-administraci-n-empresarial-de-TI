@@ -1,0 +1,23 @@
+name: Agent Control CI
+on:
+  push:
+    branches: [feature/v0.6.0-agent-control-command-telemetry]
+    paths: ['services/agent-control-service/**', '.github/workflows/agent-control-ci.yml']
+  pull_request:
+    paths: ['services/agent-control-service/**', '.github/workflows/agent-control-ci.yml']
+permissions: {contents: read}
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    defaults: {run: {working-directory: services/agent-control-service}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip, cache-dependency-path: services/agent-control-service/pyproject.toml}
+      - run: pip install -e '.[test]'
+      - run: python -m compileall app
+      - run: python -m pytest -q
+      - name: Migration roundtrip
+        run: AGENT_CONTROL_DATABASE_URL=sqlite+pysqlite:///./ci.db alembic upgrade head && AGENT_CONTROL_DATABASE_URL=sqlite+pysqlite:///./ci.db alembic downgrade base && AGENT_CONTROL_DATABASE_URL=sqlite+pysqlite:///./ci.db alembic upgrade head
+      - name: Docker build
+        run: docker build -t it-guardian-agent-control:ci .
