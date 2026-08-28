@@ -22,6 +22,7 @@ permissions:
 
 env:
   DEVICE_PROXY_SHARED_SECRET: compose-ci-device-proxy-secret-not-for-production
+  VALKEY_PASSWORD: compose-ci-valkey-secret-not-for-production
 
 jobs:
   test:
