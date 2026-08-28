@@ -28,14 +28,13 @@ class FakeGateway:
 
 
 def app(gateway):
-    return create_app(
-        settings=Settings(cookie_secure=False, session_ttl_seconds=300, max_sessions=10),
-        gateway=gateway,
-    )
+    return create_app(settings=Settings(cookie_secure=False, session_ttl_seconds=300, max_sessions=10), gateway=gateway)
 
 
 def login(client):
-    assert client.post("/console/api/session/login", json={"email": "a@b.c", "password": "secret"}).status_code == 200
+    response = client.post("/console/api/session/login", json={"email": "a@b.c", "password": "secret"})
+    assert response.status_code == 200
+    return response.json()["csrf_token"]
 
 
 def test_operation_registry_is_explicit_and_contains_no_device_plane():
@@ -59,17 +58,11 @@ def test_devices_route_uses_server_side_bearer_only():
 def test_command_create_forwards_json_but_not_browser_authorization():
     gateway = FakeGateway()
     with TestClient(app(gateway)) as client:
-        login(client)
+        csrf = login(client)
         response = client.post(
             "/console/api/commands",
-            headers={"Authorization": "Bearer attacker"},
-            json={
-                "guardian_asset_id": "a",
-                "device_id": "d",
-                "command_type": "inventory.refresh",
-                "arguments": {},
-                "idempotency_key": "k",
-            },
+            headers={"Authorization": "Bearer attacker", "X-Guardian-CSRF": csrf},
+            json={"guardian_asset_id": "a", "device_id": "d", "command_type": "inventory.refresh", "arguments": {}, "idempotency_key": "k"},
         )
         assert response.status_code == 201
         call = gateway.calls[-1]
