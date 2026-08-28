@@ -83,7 +83,7 @@ jobs:
 
   windows-build-package:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     defaults:
       run:
         shell: pwsh
@@ -161,6 +161,55 @@ jobs:
             "$PWD\packaging\windows\Product.wxs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ((Get-Item dist/ITGuardian-Agent-0.7.0-x64.msi).Length -le 0) { throw 'empty MSI' }
+
+      - name: Smoke install and uninstall x64 MSI
+        working-directory: agents/windows-agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $msi = (Resolve-Path 'dist/ITGuardian-Agent-0.7.0-x64.msi').Path
+          $installLog = Join-Path $env:RUNNER_TEMP 'itguardian-msi-install.log'
+          $uninstallLog = Join-Path $env:RUNNER_TEMP 'itguardian-msi-uninstall.log'
+          $installed = $false
+          try {
+            & msiexec.exe /i $msi /qn /norestart /L*v $installLog
+            if ($LASTEXITCODE -ne 0) {
+              Get-Content $installLog -Tail 200 -ErrorAction SilentlyContinue
+              exit $LASTEXITCODE
+            }
+            $installed = $true
+
+            $exe = Join-Path $env:ProgramFiles 'IT Guardian\itguardian-agent.exe'
+            $template = Join-Path $env:ProgramData 'ITGuardian\Agent\agent.example.json'
+            if (-not (Test-Path $exe)) { throw "installed agent executable missing: $exe" }
+            if (-not (Test-Path $template)) { throw "installed configuration template missing: $template" }
+
+            $reportedVersion = (& $exe version).Trim()
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($reportedVersion -ne '0.7.0-dev.1') { throw "unexpected installed agent version: $reportedVersion" }
+
+            $templateJson = Get-Content $template -Raw | ConvertFrom-Json
+            if (-not $templateJson.device_edge_url -or -not $templateJson.server_ca_path) { throw 'installed configuration template is incomplete' }
+            if ($templateJson.PSObject.Properties.Name -contains 'update_public_key') { throw 'placeholder update key must not ship in default template' }
+
+            $svc = Get-CimInstance Win32_Service -Filter "Name='ITGuardianAgent'"
+            if ($null -eq $svc) { throw 'ITGuardianAgent service was not installed' }
+            if ($svc.StartMode -ne 'Auto') { throw "unexpected service start mode: $($svc.StartMode)" }
+            if ($svc.StartName -notmatch '(?i)LocalService|Local Service') { throw "unexpected service account: $($svc.StartName)" }
+            if ($svc.State -ne 'Stopped') { throw "MSI must not start unenrolled agent; state=$($svc.State)" }
+            if ($svc.PathName -notmatch 'run' -or $svc.PathName -notmatch 'agent\.json') { throw "unexpected service command line: $($svc.PathName)" }
+          }
+          finally {
+            if ($installed) {
+              & msiexec.exe /x $msi /qn /norestart /L*v $uninstallLog
+              if ($LASTEXITCODE -ne 0) {
+                Get-Content $uninstallLog -Tail 200 -ErrorAction SilentlyContinue
+                throw "MSI uninstall failed with exit code $LASTEXITCODE"
+              }
+            }
+          }
+          if (Get-Service ITGuardianAgent -ErrorAction SilentlyContinue) { throw 'service remains after uninstall' }
+          if (Test-Path (Join-Path $env:ProgramFiles 'IT Guardian\itguardian-agent.exe')) { throw 'agent executable remains after uninstall' }
 
       - name: Produce SHA-256 manifest
         working-directory: agents/windows-agent
