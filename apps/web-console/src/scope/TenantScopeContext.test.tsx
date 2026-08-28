@@ -1,5 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TenantScopeProvider, useTenantScope } from './TenantScopeContext'
 
@@ -37,9 +36,9 @@ it('selects first accessible tenant and resets site when tenant changes without 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={client}><TenantScopeProvider><Probe /></TenantScopeProvider></QueryClientProvider>)
   await waitFor(() => expect(screen.getByTestId('tenant')).toHaveTextContent('t1'))
-  await userEvent.selectOptions(screen.getByLabelText('site'), 's1')
+  fireEvent.change(screen.getByLabelText('site'), { target: { value: 's1' } })
   expect(screen.getByTestId('site')).toHaveTextContent('s1')
-  await userEvent.selectOptions(screen.getByLabelText('tenant'), 't2')
+  fireEvent.change(screen.getByLabelText('tenant'), { target: { value: 't2' } })
   await waitFor(() => expect(screen.getByTestId('site')).toHaveTextContent(''))
   expect(calls).toContain('/console/api/tenants/t2/sites')
   expect(localStorage.length).toBe(0)
