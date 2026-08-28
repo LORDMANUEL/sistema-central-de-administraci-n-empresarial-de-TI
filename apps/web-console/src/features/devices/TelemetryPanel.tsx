@@ -21,3 +21,4 @@ export function TelemetryPanel({ samples }: { samples: TelemetrySample[] }) {
       })}
     </section>
   )
+}

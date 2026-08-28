@@ -14,12 +14,12 @@ from .metrics import ROUTE_REJECTS, render_metrics
 from .rate_limit import TokenBucketLimiter, default_bucket_policies
 from .routes import AuthMode, RouteRegistry
 from .runtime import handle_gateway_request
-from .v06_routes import build_v06_route_policies
+from .v08_routes import build_v08_route_policies
 
 
 def create_app(*, settings: Settings | None = None, identity_verifier: IdentityAccessVerifier | None = None, http_client: httpx.AsyncClient | None = None, audit_publisher: AuditEventPublisher | None = None, rate_limiter: TokenBucketLimiter | None = None) -> FastAPI:
     resolved = settings or Settings()
-    route_registry = RouteRegistry(build_v06_route_policies(resolved))
+    route_registry = RouteRegistry(build_v08_route_policies(resolved))
     owned_http_client = http_client is None
     owned_audit_publisher = audit_publisher is None
     resolved_http_client = http_client or httpx.AsyncClient()
@@ -32,7 +32,7 @@ def create_app(*, settings: Settings | None = None, identity_verifier: IdentityA
             if owned_http_client: await app.state.http_client.aclose()
             if owned_audit_publisher: await app.state.audit_publisher.close()
 
-    app = FastAPI(title="IT Guardian Gateway Service", version="0.6.0-dev.1", lifespan=lifespan)
+    app = FastAPI(title="IT Guardian Gateway Service", version="0.8.0-dev.1", lifespan=lifespan)
     app.state.settings = resolved
     app.state.route_registry = route_registry
     app.state.identity_verifier = identity_verifier or IdentityAccessVerifier(resolved)
