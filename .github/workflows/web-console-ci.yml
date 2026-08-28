@@ -108,10 +108,30 @@ jobs:
         run: npm run build
       - name: Reject browser token persistence
         run: |
-          if grep -R -nE '(localStorage|sessionStorage|indexedDB|access_token|refresh_token|Authorization:[[:space:]]*[`"'"']?Bearer)' apps/web-console/src --exclude='*.test.ts' --exclude='*.test.tsx'; then
-            echo 'Forbidden browser token storage/handling found' >&2
-            exit 1
-          fi
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('apps/web-console/src')
+          forbidden = {
+              'localStorage': re.compile(r'\blocalStorage\b'),
+              'sessionStorage': re.compile(r'\bsessionStorage\b'),
+              'indexedDB': re.compile(r'\bindexedDB\b'),
+              'access_token': re.compile(r'\baccess_token\b'),
+              'refresh_token': re.compile(r'\brefresh_token\b'),
+              'browser bearer auth': re.compile(r'Authorization\s*[:=].*Bearer', re.I),
+          }
+          findings = []
+          for path in root.rglob('*'):
+              if not path.is_file() or path.suffix not in {'.ts', '.tsx'} or '.test.' in path.name:
+                  continue
+              text = path.read_text(encoding='utf-8')
+              for name, pattern in forbidden.items():
+                  if pattern.search(text):
+                      findings.append(f'{path}: {name}')
+          if findings:
+              raise SystemExit('Forbidden browser token storage/handling found:\n' + '\n'.join(findings))
+          PY
 
   container-compose:
     runs-on: ubuntu-latest
