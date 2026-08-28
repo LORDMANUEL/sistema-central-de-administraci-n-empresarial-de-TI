@@ -158,3 +158,45 @@ services:
     depends_on: {telemetry-migrate: {condition: service_completed_successfully}, nats: {condition: service_started}}
     environment: {TELEMETRY_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-guardian}:${POSTGRES_PASSWORD}@postgres:5432/${TELEMETRY_DB:-guardian_telemetry}", TELEMETRY_NATS_URL: "nats://nats:4222", TELEMETRY_NATS_STREAM: "GUARDIAN_EVENTS"}
     command: ["python", "-m", "app.outbox_worker"]
+
+  device-edge-tls-init:
+    build: {context: ./services/device-edge-service}
+    restart: "no"
+    environment:
+      DEVICE_EDGE_TLS_CA_DIR: /var/lib/guardian/device-edge-ca
+      DEVICE_EDGE_TLS_RUNTIME_DIR: /var/lib/guardian/device-edge-tls
+      DEVICE_EDGE_TLS_SERVER_NAMES: ${DEVICE_EDGE_TLS_SERVER_NAMES:-localhost,device-edge-service}
+    volumes:
+      - guardian-device-edge-ca:/var/lib/guardian/device-edge-ca
+      - guardian-device-edge-tls:/var/lib/guardian/device-edge-tls
+    command: ["init-server-tls"]
+    healthcheck: {disable: true}
+
+  device-edge-service:
+    build: {context: ./services/device-edge-service}
+    restart: unless-stopped
+    depends_on:
+      device-edge-tls-init: {condition: service_completed_successfully}
+      pki-service: {condition: service_healthy}
+      agent-control-service: {condition: service_healthy}
+      command-service: {condition: service_healthy}
+      telemetry-service: {condition: service_healthy}
+    environment:
+      DEVICE_EDGE_LISTEN_ADDR: :8443
+      DEVICE_EDGE_TLS_CERT_FILE: /var/lib/guardian/device-edge-tls/server-cert.pem
+      DEVICE_EDGE_TLS_KEY_FILE: /var/lib/guardian/device-edge-tls/server-key.pem
+      DEVICE_EDGE_CA_CHAIN_URL: http://pki-service:8000/api/v1/ca/chain
+      DEVICE_EDGE_CRL_URL: http://pki-service:8000/api/v1/ca/crl
+      DEVICE_EDGE_CRL_REFRESH_SECONDS: ${DEVICE_EDGE_CRL_REFRESH_SECONDS:-300}
+      DEVICE_EDGE_MAX_BODY_BYTES: ${DEVICE_EDGE_MAX_BODY_BYTES:-262144}
+      AGENT_CONTROL_SERVICE_URL: http://agent-control-service:8000
+      COMMAND_SERVICE_URL: http://command-service:8000
+      TELEMETRY_SERVICE_URL: http://telemetry-service:8000
+      DEVICE_PROXY_SHARED_SECRET: ${DEVICE_PROXY_SHARED_SECRET:?DEVICE_PROXY_SHARED_SECRET is required}
+    volumes:
+      - guardian-device-edge-tls:/var/lib/guardian/device-edge-tls:ro
+    ports: ["${DEVICE_EDGE_BIND_HOST:-0.0.0.0}:${DEVICE_EDGE_PORT:-8443}:8443"]
+
+volumes:
+  guardian-device-edge-ca:
+  guardian-device-edge-tls:
