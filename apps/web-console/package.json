@@ -1,7 +1,7 @@
 {
   "name": "it-guardian-web-console",
   "private": true,
-  "version": "0.8.0-dev.1",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",

@@ -25,7 +25,7 @@ def _session_store(settings: Settings):
 
 def create_app(*, settings: Settings | None = None, gateway=None, static_dir: str | Path | None = None, session_store=None) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title="IT Guardian Web Console BFF", version="0.8.0-dev.1")
+    app = FastAPI(title="IT Guardian Web Console BFF", version="0.8.0")
     app.state.settings = settings
     app.state.sessions = session_store or _session_store(settings)
     app.state.gateway = gateway or GatewayClient(settings)

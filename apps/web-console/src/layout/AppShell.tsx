@@ -37,7 +37,7 @@ export function AppShell() {
             <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `nav-item${isActive ? ' nav-item--active' : ''}`}><Icon size={18} /><span>{label}</span></NavLink>
           ))}
         </nav>
-        <div className="sidebar-foot"><ClipboardList size={16} /><span>Core v0.7 certificado</span></div>
+        <div className="sidebar-foot"><ClipboardList size={16} /><span>Core v0.8 certificado</span></div>
       </aside>
       <main className="main-area">
         <header className="topbar">
