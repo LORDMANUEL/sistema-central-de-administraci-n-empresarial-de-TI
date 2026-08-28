@@ -18,6 +18,10 @@ type RevocationChecker interface {
 	IsRevoked(*big.Int) bool
 }
 
+type revocationValidity interface {
+	Valid(time.Time) bool
+}
+
 type Config struct {
 	AgentControlURL string
 	CommandURL      string
@@ -71,6 +75,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.TLS == nil || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.PeerCertificates) == 0 {
 		writeError(w, http.StatusUnauthorized, "device_edge.mtls_required")
+		return
+	}
+	if validity, ok := h.revocations.(revocationValidity); ok && !validity.Valid(time.Now()) {
+		writeError(w, http.StatusServiceUnavailable, "device_edge.crl_unavailable")
 		return
 	}
 	cert := r.TLS.PeerCertificates[0]
