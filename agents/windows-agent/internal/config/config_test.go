@@ -61,3 +61,14 @@ func TestValidateUpdateConfigurationIsPinnedAndAllOrNothing(t *testing.T) {
 		t.Fatal("invalid Ed25519 public key must fail")
 	}
 }
+
+func TestPackagedExampleConfigurationLoads(t *testing.T) {
+	path := filepath.Join("..", "..", "packaging", "windows", "agent.example.json")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("packaged example configuration must load: %v", err)
+	}
+	if cfg.DeviceEdgeURL == "" || cfg.StatePath == "" || cfg.SpoolDir == "" {
+		t.Fatalf("packaged example configuration is incomplete: %#v", cfg)
+	}
+}
