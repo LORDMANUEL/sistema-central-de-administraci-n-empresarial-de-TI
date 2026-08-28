@@ -22,6 +22,9 @@ on:
 permissions:
   contents: read
 
+env:
+  VALKEY_PASSWORD: ci-valkey-secret-long-value
+
 jobs:
   test:
     runs-on: ubuntu-latest
