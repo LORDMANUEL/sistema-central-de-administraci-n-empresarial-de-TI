@@ -15,6 +15,9 @@ def settings() -> Settings:
         enrollment_service_url="http://enrollment-service:8000",
         pki_service_url="http://pki-service:8000",
         audit_service_url="http://audit-service:8000",
+        agent_control_service_url="http://agent-control-service:8000",
+        command_service_url="http://command-service:8000",
+        telemetry_service_url="http://telemetry-service:8000",
     )
 
 
@@ -27,7 +30,7 @@ def test_initial_registry_is_explicit_unique_and_contains_no_catchall():
     northbound = [policy for policy in policies if policy.auth_mode != AuthMode.INTERNAL_ONLY]
     internal = [policy for policy in policies if policy.auth_mode == AuthMode.INTERNAL_ONLY]
 
-    assert len(northbound) == 34
+    assert len(northbound) == 41
     assert len(internal) == 7
     assert len({policy.route_id for policy in policies}) == len(policies)
     assert len({(policy.method, policy.path_template) for policy in policies}) == len(policies)
@@ -56,12 +59,35 @@ def test_known_static_and_dynamic_routes_resolve_to_fixed_upstreams():
     assert asset.path_params == {"asset_id": "asset-123"}
 
 
+def test_v08_admin_operations_are_explicit_and_device_plane_stays_blocked():
+    routes = registry()
+    expected = (
+        ("GET", "/api/v1/devices", "agent_control.device.list", "http://agent-control-service:8000"),
+        ("GET", "/api/v1/devices/11111111-1111-1111-1111-111111111111", "agent_control.device.get", "http://agent-control-service:8000"),
+        ("POST", "/api/v1/commands", "command.create", "http://command-service:8000"),
+        ("GET", "/api/v1/commands", "command.list", "http://command-service:8000"),
+        ("GET", "/api/v1/commands/11111111-1111-1111-1111-111111111111", "command.get", "http://command-service:8000"),
+        ("POST", "/api/v1/commands/11111111-1111-1111-1111-111111111111/cancel", "command.cancel", "http://command-service:8000"),
+        ("GET", "/api/v1/telemetry/devices/11111111-1111-1111-1111-111111111111/latest", "telemetry.device.latest", "http://telemetry-service:8000"),
+    )
+    for method, path, route_id, upstream in expected:
+        match = routes.require_northbound(method, path)
+        assert match.policy.route_id == route_id
+        assert match.policy.auth_mode == AuthMode.IDENTITY
+        assert match.policy.upstream_base_url == upstream
+
+    for method, path in (
+        ("POST", "/api/v1/device/heartbeat"),
+        ("POST", "/api/v1/device/commands/acquire"),
+        ("POST", "/api/v1/device/telemetry"),
+    ):
+        assert routes.match(method, path) is None
+
+
 def test_internal_only_and_unknown_routes_are_not_northbound():
     routes = registry()
 
-    tenant_access = routes.match(
-        "GET", "/api/v1/tenants/tenant-1/access", include_internal=True
-    )
+    tenant_access = routes.match("GET", "/api/v1/tenants/tenant-1/access", include_internal=True)
     assert tenant_access is not None
     assert tenant_access.policy.auth_mode == AuthMode.INTERNAL_ONLY
     assert routes.match("GET", "/api/v1/tenants/tenant-1/access") is None
@@ -117,6 +143,11 @@ def test_route_security_profiles_are_declared_not_inferred_from_client_input():
     assert audit.auth_mode == AuthMode.IDENTITY
     assert audit.mutation is False
     assert audit.upstream_base_url == "http://audit-service:8000"
+
+    command = routes.require_northbound("POST", "/api/v1/commands").policy
+    assert command.mutation is True
+    assert command.audit_intent_required is True
+    assert command.rate_limit_bucket == "admin-write"
 
 
 def test_wrong_method_does_not_fall_through_to_another_policy():
