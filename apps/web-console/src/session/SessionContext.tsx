@@ -8,6 +8,7 @@ interface SessionValue {
   user: User | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
+  bootstrap: (email: string, displayName: string, password: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -25,6 +26,10 @@ export function SessionProvider({ children }: PropsWithChildren) {
     mutationFn: ({ email, password }: { email: string; password: string }) => api.post<SessionResponse>('/session/login', { email, password }),
     onSuccess: (data) => queryClient.setQueryData(['session'], data),
   })
+  const bootstrapMutation = useMutation({
+    mutationFn: ({ email, displayName, password }: { email: string; displayName: string; password: string }) => api.post<SessionResponse>('/session/bootstrap', { email, display_name: displayName, password }),
+    onSuccess: (data) => queryClient.setQueryData(['session'], data),
+  })
   const logoutMutation = useMutation({
     mutationFn: () => api.post<void>('/session/logout'),
     onSettled: () => queryClient.setQueryData(['session'], null),
@@ -36,6 +41,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
       user,
       loading: session.isLoading,
       login: async (email, password) => { await loginMutation.mutateAsync({ email, password }) },
+      bootstrap: async (email, displayName, password) => { await bootstrapMutation.mutateAsync({ email, displayName, password }) },
       logout: async () => { await logoutMutation.mutateAsync() },
     }}>
       {children}

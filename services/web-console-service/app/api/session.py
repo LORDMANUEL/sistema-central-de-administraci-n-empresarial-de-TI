@@ -15,6 +15,12 @@ class LoginInput(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class BootstrapInput(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    display_name: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=12, max_length=256)
+
+
 def _user_from_response(response):
     if response.status_code >= 400:
         raise ConsoleError(response.status_code, "console.me_failed", "Unable to load current user")
@@ -24,17 +30,12 @@ def _user_from_response(response):
         raise ConsoleError(502, "console.invalid_user_response", "Current user response is invalid") from exc
 
 
-@router.post("/login")
-def login(payload: LoginInput, request: Request, response: Response):
-    access, refresh = parse_token_pair(request.app.state.gateway.login(payload.email, payload.password))
+def _establish_session(email: str, password: str, request: Request, response: Response):
+    access, refresh = parse_token_pair(request.app.state.gateway.login(email, password))
     session_id = request.app.state.sessions.create(access, refresh)
     try:
         user = _user_from_response(
-            request.app.state.gateway.request(
-                "GET",
-                "/api/v1/users/me",
-                access_token=access,
-            )
+            request.app.state.gateway.request("GET", "/api/v1/users/me", access_token=access)
         )
     except Exception:
         request.app.state.sessions.delete(session_id)
@@ -49,6 +50,17 @@ def login(payload: LoginInput, request: Request, response: Response):
         max_age=request.app.state.settings.session_ttl_seconds,
     )
     return {"user": user}
+
+
+@router.post("/bootstrap", status_code=status.HTTP_201_CREATED)
+def bootstrap(payload: BootstrapInput, request: Request, response: Response):
+    request.app.state.gateway.bootstrap(payload.email, payload.display_name, payload.password)
+    return _establish_session(payload.email, payload.password, request, response)
+
+
+@router.post("/login")
+def login(payload: LoginInput, request: Request, response: Response):
+    return _establish_session(payload.email, payload.password, request, response)
 
 
 @router.get("/me")

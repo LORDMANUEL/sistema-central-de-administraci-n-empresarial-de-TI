@@ -8,7 +8,12 @@ from app.main import create_app
 class FakeGateway:
     def __init__(self):
         self.refreshes = 0
+        self.bootstraps = 0
         self.me_statuses = [200]
+
+    def bootstrap(self, email, display_name, password):
+        self.bootstraps += 1
+        return {"id": "u1", "email": email, "display_name": display_name, "role": "platform_admin", "is_active": True}
 
     def login(self, email, password):
         return {"access_token": "access-secret", "refresh_token": "refresh-secret", "token_type": "bearer"}
@@ -26,12 +31,24 @@ class FakeGateway:
                 else {"error": {"code": "expired"}}
             )
             return httpx.Response(code, json=payload)
+        if path == "/health/live":
+            return httpx.Response(200, json={"status": "ok"})
         raise AssertionError((method, path))
 
 
 def app(gateway):
     settings = Settings(cookie_secure=False, session_ttl_seconds=300, max_sessions=10)
     return create_app(settings=settings, gateway=gateway)
+
+
+def test_bootstrap_creates_first_admin_then_establishes_opaque_session():
+    gateway = FakeGateway()
+    with TestClient(app(gateway)) as client:
+        response = client.post("/console/api/session/bootstrap", json={"email": "admin@example.com", "display_name": "Admin", "password": "very-secret-12"})
+        assert response.status_code == 201 and gateway.bootstraps == 1
+        assert response.json()["user"]["role"] == "platform_admin"
+        assert "access-secret" not in response.text and "refresh-secret" not in response.text
+        assert "HttpOnly" in response.headers["set-cookie"]
 
 
 def test_login_cookie_is_opaque_httponly_and_body_has_no_guardian_tokens():

@@ -27,8 +27,19 @@ class GatewayClient:
                 if isinstance(data, dict)
                 else "Gateway request failed"
             )
-            raise ConsoleError(response.status_code, code, message)
+            upstream_code = data.get("error", {}).get("code") if isinstance(data, dict) else None
+            raise ConsoleError(response.status_code, str(upstream_code or code), message)
         return data
+
+    def bootstrap(self, email: str, display_name: str, password: str):
+        try:
+            response = self.client.post(
+                "/api/v1/auth/bootstrap",
+                json={"email": email, "display_name": display_name, "password": password},
+            )
+        except httpx.HTTPError as exc:
+            raise ConsoleError(503, "console.gateway_unavailable", "Gateway is unavailable") from exc
+        return self._json_response(response, "console.bootstrap_failed")
 
     def login(self, email: str, password: str):
         try:
