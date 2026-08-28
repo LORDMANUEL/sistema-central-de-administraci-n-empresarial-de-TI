@@ -27,6 +27,9 @@ func PrepareUpdate(ctx context.Context, cfg config.Runtime, currentVersion strin
 	if !cfg.UpdateEnabled() {
 		return "", errors.New("signed update catalog is not configured")
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	publicKey, err := cfg.UpdatePublicKeyBytes()
 	if err != nil {
 		return "", err
@@ -54,6 +57,10 @@ func PrepareUpdate(ctx context.Context, cfg config.Runtime, currentVersion strin
 	if err != nil {
 		return "", err
 	}
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(paths.Staged)
+		return "", err
+	}
 	if err := copyExecutableAtomic(current, paths.Helper); err != nil {
 		_ = os.Remove(paths.Staged)
 		return "", fmt.Errorf("prepare update helper: %w", err)
@@ -68,16 +75,19 @@ func PrepareUpdate(ctx context.Context, cfg config.Runtime, currentVersion strin
 		"--health", paths.Health,
 		"--deadline-unix", strconv.FormatInt(deadline.Unix(), 10),
 	}
-	command := exec.CommandContext(ctx, paths.Helper, args...)
-	command.Stdin = nil
-	command.Stdout = nil
-	command.Stderr = nil
-	if err := command.Start(); err != nil {
+	// The helper must outlive this parent process so the current executable can
+	// be replaced after exit. It is a fixed copy of the current trusted binary,
+	// not a shell or caller-selected executable.
+	helper := exec.Command(paths.Helper, args...)
+	helper.Stdin = nil
+	helper.Stdout = nil
+	helper.Stderr = nil
+	if err := helper.Start(); err != nil {
 		_ = os.Remove(paths.Staged)
 		_ = os.Remove(paths.Helper)
 		return "", fmt.Errorf("launch update helper: %w", err)
 	}
-	if err := command.Process.Release(); err != nil {
+	if err := helper.Process.Release(); err != nil {
 		return "", fmt.Errorf("release update helper: %w", err)
 	}
 	return manifest.Version, nil
@@ -123,6 +133,13 @@ func copyExecutableAtomic(source, destination string) error {
 	if strings.EqualFold(filepath.Clean(source), filepath.Clean(destination)) {
 		return errors.New("update helper source/destination must differ")
 	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if info.Size() <= 0 || info.Size() > 256<<20 {
+		return errors.New("current agent executable size is outside update policy")
+	}
 	if err := os.Remove(destination); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -149,8 +166,12 @@ func copyExecutableAtomic(source, destination string) error {
 	if err := tmp.Chmod(0o700); err != nil {
 		return err
 	}
-	if _, err := io.Copy(tmp, io.LimitReader(in, 256<<20)); err != nil {
+	written, err := io.Copy(tmp, io.LimitReader(in, info.Size()+1))
+	if err != nil {
 		return err
+	}
+	if written != info.Size() {
+		return errors.New("update helper copy size mismatch")
 	}
 	if err := tmp.Sync(); err != nil {
 		return err
