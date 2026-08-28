@@ -12,6 +12,7 @@ on:
       - 'services/web-console-service/**'
       - 'services/agent-control-service/**'
       - 'services/gateway-service/**'
+      - 'tests/e2e/v08_console_fixture.py'
       - 'compose.override.yaml'
       - '.env.example'
       - '.github/workflows/web-console-ci.yml'
@@ -169,3 +170,99 @@ jobs:
           curl -fsS http://127.0.0.1:18088/health/live
           curl -fsS http://127.0.0.1:18088/console/ | grep -q '<div id="root"></div>'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18088/console/api/not-real)" = 404
+
+  clean-stack-browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    needs: [container-compose]
+    env:
+      POSTGRES_PASSWORD: ci-password-not-for-production
+      IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+      ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
+      DEVICE_PROXY_SHARED_SECRET: v08-ci-device-proxy-secret-not-for-production
+      VALKEY_PASSWORD: ci-valkey-secret-long-value
+      GUARDIAN_ENV: production
+      WEB_CONSOLE_COOKIE_SECURE: 'false'
+      GATEWAY_PORT: 8080
+      WEB_CONSOLE_PORT: 8088
+      DEVICE_EDGE_BIND_HOST: 127.0.0.1
+      DEVICE_EDGE_PORT: 8443
+      DEVICE_EDGE_TLS_SERVER_NAMES: localhost,device-edge-service
+      DEVICE_EDGE_CRL_REFRESH_SECONDS: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web-console/package.json
+      - name: Start v0.8 from empty volumes
+        run: |
+          docker compose down -v --remove-orphans || true
+          docker compose up -d --build
+      - name: Prepare real mTLS endpoint fixture
+        run: |
+          runtime="$RUNNER_TEMP/guardian-v08-console"
+          mkdir -p "$runtime"
+          python tests/e2e/v08_console_fixture.py prepare "$runtime"
+          echo "GUARDIAN_V08_FIXTURE=$runtime/fixture.json" >> "$GITHUB_ENV"
+          echo "GUARDIAN_V08_RUNTIME=$runtime" >> "$GITHUB_ENV"
+      - name: Wait for Web Console readiness
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8088/health/ready >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Start mTLS device command consumer
+        run: |
+          python tests/e2e/v08_console_fixture.py agent-loop "$GUARDIAN_V08_RUNTIME" --timeout 300 >"$GUARDIAN_V08_RUNTIME/agent.log" 2>&1 &
+          echo $! > "$GUARDIAN_V08_RUNTIME/agent.pid"
+      - name: Install browser test dependencies
+        working-directory: apps/web-console
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Certify Web Console through Chromium
+        working-directory: apps/web-console
+        env:
+          WEB_CONSOLE_E2E_BASE_URL: http://127.0.0.1:8088/console/
+        run: npm run test:e2e
+      - name: Require mTLS agent command completion
+        run: |
+          pid="$(cat "$GUARDIAN_V08_RUNTIME/agent.pid")"
+          wait "$pid"
+          test -s "$GUARDIAN_V08_RUNTIME/agent-result.json"
+          cat "$GUARDIAN_V08_RUNTIME/agent-result.json"
+      - name: Verify v0.8 runtime isolation
+        run: |
+          python - <<'PY'
+          import json, subprocess
+          for service in ('web-console-service', 'device-edge-service'):
+              cid = subprocess.check_output(['docker','compose','ps','-q',service], text=True).strip()
+              assert cid, service
+              inspected = json.loads(subprocess.check_output(['docker','inspect',cid], text=True))[0]
+              assert str(inspected['Config'].get('User','')) not in {'','0','root','0:0'}, (service, inspected['Config'].get('User'))
+          valkey = subprocess.check_output(['docker','compose','config'], text=True)
+          block = valkey.split('\n  valkey:', 1)[1].split('\n  ', 1)[0]
+          assert '\n    ports:' not in block, block
+          PY
+      - name: Dump v0.8 browser/stack state on failure
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=1800
+          test -f "$GUARDIAN_V08_RUNTIME/agent.log" && cat "$GUARDIAN_V08_RUNTIME/agent.log" || true
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v08-playwright-failure
+          path: |
+            apps/web-console/test-results
+            apps/web-console/playwright-report
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Tear down containers and volumes
+        if: always()
+        run: docker compose down -v --remove-orphans
