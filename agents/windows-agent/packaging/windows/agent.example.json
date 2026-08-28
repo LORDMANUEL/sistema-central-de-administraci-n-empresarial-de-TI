@@ -1,11 +1,7 @@
 {
-  "device_edge_url": "https://guardian.example.invalid:8443",
+  "device_edge_url": "https://guardian.example.com:8443",
   "server_ca_path": "C:\\ProgramData\\ITGuardian\\Agent\\device-edge-ca.pem",
   "state_path": "C:\\ProgramData\\ITGuardian\\Agent\\identity.json",
   "spool_dir": "C:\\ProgramData\\ITGuardian\\Agent\\spool",
-  "telemetry_interval_seconds": 60,
-  "update_manifest_url": "https://guardian.example.invalid/updates/windows/manifest.json",
-  "update_public_key": "BASE64_ED25519_PUBLIC_KEY_GOES_HERE",
-  "update_max_bytes": 67108864,
-  "update_health_timeout_seconds": 120
+  "telemetry_interval_seconds": 60
 }
