@@ -19,6 +19,7 @@ import (
 
 	edgeproxy "github.com/LORDMANUEL/sistema-central-de-administraci-n-empresarial-de-TI/services/device-edge-service/internal/proxy"
 	"github.com/LORDMANUEL/sistema-central-de-administraci-n-empresarial-de-TI/services/device-edge-service/internal/revocation"
+	"github.com/LORDMANUEL/sistema-central-de-administraci-n-empresarial-de-TI/services/device-edge-service/internal/servertls"
 )
 
 type settings struct {
@@ -36,6 +37,12 @@ type settings struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "init-server-tls" {
+		if err := runTLSInit(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	cfg, err := loadSettings()
 	if err != nil {
 		log.Fatal(err)
@@ -121,6 +128,17 @@ func main() {
 	}
 }
 
+func runTLSInit() error {
+	caDir := env("DEVICE_EDGE_TLS_CA_DIR", "/var/lib/guardian/device-edge-ca")
+	runtimeDir := env("DEVICE_EDGE_TLS_RUNTIME_DIR", "/var/lib/guardian/device-edge-tls")
+	names := strings.Split(env("DEVICE_EDGE_TLS_SERVER_NAMES", "localhost,device-edge-service"), ",")
+	if err := servertls.Generate(caDir, runtimeDir, names, time.Now().UTC()); err != nil {
+		return err
+	}
+	log.Printf("Device Edge TLS material initialized for %s", strings.Join(names, ","))
+	return nil
+}
+
 func loadSettings() (settings, error) {
 	maxBody, err := strconv.ParseInt(env("DEVICE_EDGE_MAX_BODY_BYTES", "262144"), 10, 64)
 	if err != nil || maxBody <= 0 || maxBody > 2<<20 {
@@ -134,12 +152,12 @@ func loadSettings() (settings, error) {
 		listenAddr:      env("DEVICE_EDGE_LISTEN_ADDR", ":8443"),
 		tlsCertFile:     strings.TrimSpace(os.Getenv("DEVICE_EDGE_TLS_CERT_FILE")),
 		tlsKeyFile:      strings.TrimSpace(os.Getenv("DEVICE_EDGE_TLS_KEY_FILE")),
-		caChainURL:      env("DEVICE_EDGE_CA_CHAIN_URL", "http://pki-service:8004/api/v1/ca/chain"),
-		crlURL:          env("DEVICE_EDGE_CRL_URL", "http://pki-service:8004/api/v1/ca/crl"),
+		caChainURL:      env("DEVICE_EDGE_CA_CHAIN_URL", "http://pki-service:8000/api/v1/ca/chain"),
+		crlURL:          env("DEVICE_EDGE_CRL_URL", "http://pki-service:8000/api/v1/ca/crl"),
 		crlRefresh:      time.Duration(refreshSeconds) * time.Second,
-		agentControlURL: env("AGENT_CONTROL_SERVICE_URL", "http://agent-control-service:8007"),
-		commandURL:      env("COMMAND_SERVICE_URL", "http://command-service:8008"),
-		telemetryURL:    env("TELEMETRY_SERVICE_URL", "http://telemetry-service:8009"),
+		agentControlURL: env("AGENT_CONTROL_SERVICE_URL", "http://agent-control-service:8000"),
+		commandURL:      env("COMMAND_SERVICE_URL", "http://command-service:8000"),
+		telemetryURL:    env("TELEMETRY_SERVICE_URL", "http://telemetry-service:8000"),
 		proxyToken:      strings.TrimSpace(os.Getenv("DEVICE_PROXY_SHARED_SECRET")),
 		maxBodyBytes:    maxBody,
 	}
