@@ -195,6 +195,8 @@ jobs:
             $svc = Get-CimInstance Win32_Service -Filter "Name='ITGuardianAgent'"
             if ($null -eq $svc) { throw 'ITGuardianAgent service was not installed' }
             if ($svc.StartMode -ne 'Auto') { throw "unexpected service start mode: $($svc.StartMode)" }
+            $delayed = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\ITGuardianAgent' -Name DelayedAutoStart -ErrorAction Stop).DelayedAutoStart
+            if ($delayed -ne 1) { throw "ITGuardianAgent must be delayed-auto; DelayedAutoStart=$delayed" }
             if ($svc.StartName -notmatch '(?i)LocalService|Local Service') { throw "unexpected service account: $($svc.StartName)" }
             if ($svc.State -ne 'Stopped') { throw "MSI must not start unenrolled agent; state=$($svc.State)" }
             if ($svc.PathName -notmatch 'run' -or $svc.PathName -notmatch 'agent\.json') { throw "unexpected service command line: $($svc.PathName)" }
