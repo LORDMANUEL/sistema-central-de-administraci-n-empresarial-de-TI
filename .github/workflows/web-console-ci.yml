@@ -155,10 +155,7 @@ jobs:
           test "$(docker image inspect it-guardian-web-console:v08-ci --format '{{.Config.User}}')" = guardian
       - name: Assert Valkey is internal only
         run: |
-          if docker compose config | awk '/^  valkey:/{flag=1; next} /^  [a-zA-Z0-9_-]+:/{flag=0} flag' | grep -q '^    ports:'; then
-            echo 'Valkey must not publish host ports' >&2
-            exit 1
-          fi
+          docker compose config --format json | python -c 'import json,sys; model=json.load(sys.stdin); assert not model["services"]["valkey"].get("ports"), model["services"]["valkey"].get("ports")'
       - name: Smoke static runtime
         run: |
           cid=$(docker run -d -p 127.0.0.1:18088:8000 it-guardian-web-console:v08-ci)
@@ -230,22 +227,32 @@ jobs:
         run: npm run test:e2e
       - name: Require mTLS agent command completion
         run: |
-          pid="$(cat "$GUARDIAN_V08_RUNTIME/agent.pid")"
-          wait "$pid"
-          test -s "$GUARDIAN_V08_RUNTIME/agent-result.json"
-          cat "$GUARDIAN_V08_RUNTIME/agent-result.json"
+          for i in $(seq 1 60); do
+            if test -s "$GUARDIAN_V08_RUNTIME/agent-result.json"; then
+              cat "$GUARDIAN_V08_RUNTIME/agent-result.json"
+              exit 0
+            fi
+            pid="$(cat "$GUARDIAN_V08_RUNTIME/agent.pid")"
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$GUARDIAN_V08_RUNTIME/agent.log" >&2 || true
+              exit 1
+            fi
+            sleep 2
+          done
+          cat "$GUARDIAN_V08_RUNTIME/agent.log" >&2 || true
+          exit 1
       - name: Verify v0.8 runtime isolation
         run: |
-          python - <<'PY'
-          import json, subprocess
+          docker compose config --format json > "$RUNNER_TEMP/v08-compose.json"
+          python - "$RUNNER_TEMP/v08-compose.json" <<'PY'
+          import json, subprocess, sys
           for service in ('web-console-service', 'device-edge-service'):
               cid = subprocess.check_output(['docker','compose','ps','-q',service], text=True).strip()
               assert cid, service
               inspected = json.loads(subprocess.check_output(['docker','inspect',cid], text=True))[0]
               assert str(inspected['Config'].get('User','')) not in {'','0','root','0:0'}, (service, inspected['Config'].get('User'))
-          valkey = subprocess.check_output(['docker','compose','config'], text=True)
-          block = valkey.split('\n  valkey:', 1)[1].split('\n  ', 1)[0]
-          assert '\n    ports:' not in block, block
+          model = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert not model['services']['valkey'].get('ports'), model['services']['valkey'].get('ports')
           PY
       - name: Dump v0.8 browser/stack state on failure
         if: failure()
