@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,11 +15,15 @@ import (
 )
 
 type Runtime struct {
-	DeviceEdgeURL            string `json:"device_edge_url"`
-	ServerCAPath             string `json:"server_ca_path"`
-	StatePath                string `json:"state_path"`
-	SpoolDir                 string `json:"spool_dir"`
-	TelemetryIntervalSeconds int    `json:"telemetry_interval_seconds"`
+	DeviceEdgeURL              string `json:"device_edge_url"`
+	ServerCAPath               string `json:"server_ca_path"`
+	StatePath                  string `json:"state_path"`
+	SpoolDir                   string `json:"spool_dir"`
+	TelemetryIntervalSeconds   int    `json:"telemetry_interval_seconds"`
+	UpdateManifestURL          string `json:"update_manifest_url,omitempty"`
+	UpdatePublicKey            string `json:"update_public_key,omitempty"`
+	UpdateMaxBytes             int64  `json:"update_max_bytes,omitempty"`
+	UpdateHealthTimeoutSeconds int    `json:"update_health_timeout_seconds,omitempty"`
 }
 
 func DefaultDataDir() string {
@@ -56,7 +62,43 @@ func (c Runtime) Validate() error {
 	if c.TelemetryIntervalSeconds < 15 || c.TelemetryIntervalSeconds > int((15*time.Minute)/time.Second) {
 		return errors.New("telemetry_interval_seconds must be between 15 and 900")
 	}
+	manifestSet := strings.TrimSpace(c.UpdateManifestURL) != ""
+	keySet := strings.TrimSpace(c.UpdatePublicKey) != ""
+	if manifestSet != keySet {
+		return errors.New("update_manifest_url and update_public_key must be configured together")
+	}
+	if !manifestSet {
+		if c.UpdateMaxBytes != 0 || c.UpdateHealthTimeoutSeconds != 0 {
+			return errors.New("update limits require update_manifest_url and update_public_key")
+		}
+		return nil
+	}
+	updateURL, err := url.Parse(c.UpdateManifestURL)
+	if err != nil || updateURL.Scheme != "https" || updateURL.Host == "" || updateURL.User != nil || updateURL.Fragment != "" {
+		return errors.New("update_manifest_url must be absolute HTTPS without credentials or fragment")
+	}
+	if _, err := c.UpdatePublicKeyBytes(); err != nil {
+		return err
+	}
+	if c.UpdateMaxBytes <= 0 || c.UpdateMaxBytes > 256<<20 {
+		return errors.New("update_max_bytes must be between 1 and 268435456")
+	}
+	if c.UpdateHealthTimeoutSeconds < 30 || c.UpdateHealthTimeoutSeconds > 600 {
+		return errors.New("update_health_timeout_seconds must be between 30 and 600")
+	}
 	return nil
+}
+
+func (c Runtime) UpdateEnabled() bool {
+	return strings.TrimSpace(c.UpdateManifestURL) != "" && strings.TrimSpace(c.UpdatePublicKey) != ""
+}
+
+func (c Runtime) UpdatePublicKeyBytes() (ed25519.PublicKey, error) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(c.UpdatePublicKey))
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return nil, errors.New("update_public_key must be a base64 Ed25519 public key")
+	}
+	return ed25519.PublicKey(append([]byte(nil), raw...)), nil
 }
 
 func Load(path string) (Runtime, error) {
