@@ -60,6 +60,33 @@ func run(args []string) error {
 			return nil
 		}
 		return err
+	case app.CommandUpdate:
+		cfg, err := config.Load(command.ConfigPath)
+		if err != nil {
+			return fmt.Errorf("load runtime config: %w", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+		defer cancel()
+		nextVersion, err := app.PrepareUpdate(ctx, cfg, version)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("IT Guardian signed update %s staged; transactional helper launched\n", nextVersion)
+		return nil
+	case app.CommandApplyUpdate:
+		deadline := time.Unix(command.DeadlineUnix, 0).UTC()
+		maxRuntime := time.Until(deadline) + 2*time.Minute
+		if maxRuntime <= 0 || maxRuntime > 12*time.Minute {
+			return errors.New("apply-update runtime window is outside policy")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), maxRuntime)
+		defer cancel()
+		action, err := app.ApplyUpdate(ctx, command)
+		if err != nil {
+			return err
+		}
+		log.Printf("IT Guardian update transaction completed: %s", action)
+		return nil
 	default:
 		return errors.New("unsupported command")
 	}
