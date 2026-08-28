@@ -6,7 +6,7 @@ import json as jsonlib
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from ..authenticated import gateway_request
+from ..authenticated import gateway_request, require_csrf
 from ..errors import ConsoleError
 
 
@@ -62,51 +62,44 @@ if any("/device/" in operation.gateway_path for operation in OPERATIONS):
     raise RuntimeError("device plane must never be registered in Web Console")
 
 router = APIRouter(prefix="/console/api", tags=["resources"])
+_UNSAFE = {"POST", "PATCH", "PUT", "DELETE"}
 
 
 def _register(operation: Operation) -> None:
     async def endpoint(request: Request):
         payload = None
+        if operation.method in _UNSAFE:
+            require_csrf(request)
         if operation.method in {"POST", "PATCH", "PUT"}:
+            content_length = request.headers.get("content-length")
+            if content_length:
+                try:
+                    if int(content_length) > request.app.state.settings.max_json_body_bytes:
+                        raise ConsoleError(413, "console.body_too_large", "Request body exceeds the console limit")
+                except ValueError:
+                    raise ConsoleError(400, "console.content_length_invalid", "Content-Length must be an integer")
             raw = await request.body()
+            if len(raw) > request.app.state.settings.max_json_body_bytes:
+                raise ConsoleError(413, "console.body_too_large", "Request body exceeds the console limit")
             if raw:
                 try:
                     payload = jsonlib.loads(raw)
                 except Exception as exc:
                     raise ConsoleError(400, "console.invalid_json", "Request body must be valid JSON") from exc
         path = operation.gateway_path.format(**request.path_params)
-        response = gateway_request(
-            request,
-            operation.method,
-            path,
-            json=payload,
-            params=list(request.query_params.multi_items()),
-        )
+        response = gateway_request(request, operation.method, path, json=payload, params=list(request.query_params.multi_items()))
         try:
             data = response.json() if response.content else None
         except Exception as exc:
             raise ConsoleError(502, "console.invalid_gateway_response", "Gateway returned invalid JSON") from exc
         if response.status_code >= 400:
-            message = (
-                data.get("error", {}).get("message", "Gateway request failed")
-                if isinstance(data, dict)
-                else "Gateway request failed"
-            )
-            code = (
-                data.get("error", {}).get("code", "console.gateway_request_failed")
-                if isinstance(data, dict)
-                else "console.gateway_request_failed"
-            )
+            message = data.get("error", {}).get("message", "Gateway request failed") if isinstance(data, dict) else "Gateway request failed"
+            code = data.get("error", {}).get("code", "console.gateway_request_failed") if isinstance(data, dict) else "console.gateway_request_failed"
             raise ConsoleError(response.status_code, str(code), str(message))
         return JSONResponse(status_code=response.status_code, content=data)
 
     endpoint.__name__ = f"console_{operation.name.replace('.', '_')}"
-    router.add_api_route(
-        operation.console_path,
-        endpoint,
-        methods=[operation.method],
-        name=operation.name,
-    )
+    router.add_api_route(operation.console_path, endpoint, methods=[operation.method], name=operation.name)
 
 
 for _operation in OPERATIONS:
