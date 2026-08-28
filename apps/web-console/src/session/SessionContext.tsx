@@ -1,9 +1,9 @@
 import { createContext, useContext, type PropsWithChildren } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, ApiError, setCsrfToken } from '../api/client'
 import type { User } from '../api/types'
 
-interface SessionResponse { user: User }
+interface SessionResponse { user: User; csrf_token?: string }
 interface SessionValue {
   user: User | null
   loading: boolean
@@ -18,21 +18,25 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient()
   const session = useQuery({
     queryKey: ['session'],
-    queryFn: () => api.get<SessionResponse>('/session/me'),
+    queryFn: async () => {
+      const data = await api.get<SessionResponse>('/session/me')
+      setCsrfToken(data.csrf_token)
+      return data
+    },
     retry: false,
     staleTime: 30_000,
   })
   const loginMutation = useMutation({
     mutationFn: ({ email, password }: { email: string; password: string }) => api.post<SessionResponse>('/session/login', { email, password }),
-    onSuccess: (data) => queryClient.setQueryData(['session'], data),
+    onSuccess: (data) => { setCsrfToken(data.csrf_token); queryClient.setQueryData(['session'], data) },
   })
   const bootstrapMutation = useMutation({
     mutationFn: ({ email, displayName, password }: { email: string; displayName: string; password: string }) => api.post<SessionResponse>('/session/bootstrap', { email, display_name: displayName, password }),
-    onSuccess: (data) => queryClient.setQueryData(['session'], data),
+    onSuccess: (data) => { setCsrfToken(data.csrf_token); queryClient.setQueryData(['session'], data) },
   })
   const logoutMutation = useMutation({
     mutationFn: () => api.post<void>('/session/logout'),
-    onSettled: () => queryClient.setQueryData(['session'], null),
+    onSettled: () => { setCsrfToken(null); queryClient.setQueryData(['session'], null) },
   })
 
   const user = session.data?.user ?? null
