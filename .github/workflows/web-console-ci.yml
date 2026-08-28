@@ -1,0 +1,139 @@
+name: Web Console v0.8 CI
+
+on:
+  push:
+    branches:
+      - feature/v0.8.0-web-console
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'apps/web-console/**'
+      - 'services/web-console-service/**'
+      - 'services/agent-control-service/**'
+      - 'services/gateway-service/**'
+      - 'compose.override.yaml'
+      - '.env.example'
+      - '.github/workflows/web-console-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-control-admin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Agent Control
+        working-directory: services/agent-control-service
+        run: python -m pip install -e '.[test]'
+      - name: Test Agent Control admin API
+        working-directory: services/agent-control-service
+        run: python -m pytest -q
+      - name: Compile Agent Control
+        working-directory: services/agent-control-service
+        run: python -m compileall -q app
+
+  gateway-admin-routes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Gateway
+        working-directory: services/gateway-service
+        run: python -m pip install -e '.[test]'
+      - name: Test Gateway
+        working-directory: services/gateway-service
+        run: python -m pytest -q
+      - name: Prove device plane is not northbound
+        run: |
+          if grep -nE 'policy\([^\n]*"(POST|GET)"[^\n]*"/api/v1/device/' services/gateway-service/app/routes.py; then
+            echo 'Device-plane route leaked into Gateway northbound registry' >&2
+            exit 1
+          fi
+
+  bff-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Web Console BFF
+        working-directory: services/web-console-service
+        run: python -m pip install -e '.[test]'
+      - name: Test BFF
+        working-directory: services/web-console-service
+        run: python -m pytest -q
+      - name: Compile BFF
+        working-directory: services/web-console-service
+        run: python -m compileall -q app
+      - name: Enforce explicit BFF boundary
+        run: |
+          if grep -R -nE '(/api/v1/device/|X-Guardian-Proxy-Token|X-Guardian-Device-ID)' services/web-console-service/app; then
+            echo 'Device-plane primitive found in Web Console BFF' >&2
+            exit 1
+          fi
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web-console/package.json
+      - name: Install frontend
+        working-directory: apps/web-console
+        run: npm install --no-audit --no-fund
+      - name: Test frontend
+        working-directory: apps/web-console
+        run: npm run test
+      - name: Build frontend
+        working-directory: apps/web-console
+        run: npm run build
+      - name: Reject browser token persistence
+        run: |
+          if grep -R -nE '(localStorage|sessionStorage|indexedDB|access_token|refresh_token|Authorization:[[:space:]]*[`"'"']?Bearer)' apps/web-console/src --exclude='*.test.ts' --exclude='*.test.tsx'; then
+            echo 'Forbidden browser token storage/handling found' >&2
+            exit 1
+          fi
+
+  container-compose:
+    runs-on: ubuntu-latest
+    needs: [agent-control-admin, gateway-admin-routes, bff-security, frontend]
+    env:
+      POSTGRES_PASSWORD: ci-postgres-password
+      IDENTITY_SIGNING_KEY: ci-identity-seed
+      ENROLLMENT_SIGNING_KEY: ci-enrollment-seed
+      DEVICE_PROXY_SHARED_SECRET: ci-device-proxy-secret-long-value
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate effective Compose model
+        run: docker compose config >/tmp/compose-v08.yaml
+      - name: Build Web Console image
+        run: docker build -f services/web-console-service/Dockerfile -t it-guardian-web-console:v08-ci .
+      - name: Assert non-root image
+        run: |
+          test "$(docker image inspect it-guardian-web-console:v08-ci --format '{{.Config.User}}')" = guardian
+      - name: Smoke static runtime
+        run: |
+          cid=$(docker run -d -p 127.0.0.1:18088:8000 it-guardian-web-console:v08-ci)
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:18088/health/live >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18088/health/live
+          curl -fsS http://127.0.0.1:18088/console/ | grep -q '<div id="root"></div>'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18088/console/api/not-real)" = 404
