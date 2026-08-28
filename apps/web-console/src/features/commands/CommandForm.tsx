@@ -42,3 +42,4 @@ export function CommandForm({ device }: { device: Device }) {
       {mutation.isSuccess && <p className="form-success">Comando creado: {mutation.data.command_id.slice(0, 8)}…</p>}
     </form>
   )
+}
