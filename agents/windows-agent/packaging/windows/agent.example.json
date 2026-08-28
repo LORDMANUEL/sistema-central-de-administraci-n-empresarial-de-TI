@@ -1,0 +1,7 @@
+{
+  "device_edge_url": "https://guardian.example.com:8443",
+  "server_ca_path": "C:\\ProgramData\\ITGuardian\\Agent\\device-edge-ca.pem",
+  "state_path": "C:\\ProgramData\\ITGuardian\\Agent\\identity.json",
+  "spool_dir": "C:\\ProgramData\\ITGuardian\\Agent\\spool",
+  "telemetry_interval_seconds": 60
+}

@@ -2,6 +2,62 @@
 
 All notable IT Guardian changes are documented here.
 
+## [0.7.0] - 2026-08-28
+
+### Device Edge
+- Added a dedicated Go mTLS endpoint edge on port 8443.
+- Device identity is derived from the verified X.509 SPIFFE URI SAN; caller-controlled Guardian/forwarding headers are stripped.
+- Only the five v0.6 device-plane POST routes are allowlisted.
+- Added signed-CRL validation, last-good retention and fail-closed behavior after CRL expiry.
+- Added idempotent TLS server bootstrap with a separate CA volume; the serving runtime mounts public/runtime material only and runs non-root.
+
+### Windows Agent Modern
+- Added Go Windows agent with ECDSA P-256 CSR enrollment and strict certificate chain/SPIFFE/serial/fingerprint validation.
+- Device private key is protected with Windows DPAPI LocalMachine; enrollment tokens are never persisted.
+- Added mTLS device client, heartbeat/capability negotiation and native Windows CPU/RAM/disk telemetry.
+- Added typed command execution for `inventory.refresh`, `device.reboot` and `service.restart` using native WinAPI/SCM; no arbitrary shell is exposed.
+- Added bounded crash-safe offline spool (64 MiB / 10,000 items), priority for terminal command results and exponential retry/backoff.
+- A failed terminal-result upload is retried from the same durable payload without reexecuting the command.
+
+### Signed updates
+- Added Ed25519-signed canonical update manifests, HTTPS-only catalog/payload transport, bounded download and streaming SHA-256 verification.
+- Added anti-downgrade checks, atomic staging, fixed helper transaction paths and health-marker commit/rollback.
+- Update catalog URL and Ed25519 public key are pinned in `agent.json`; the CLI cannot substitute arbitrary update sources.
+- The helper controls only `ITGuardianAgent`, waits for the parent process, promotes staged content and restores the previous binary if health does not arrive.
+
+### Windows packaging
+- Added x64 WiX v4 MSI and x64/arm64 EXE builds.
+- Service installs as `NT AUTHORITY\LocalService`, Auto + delayed-auto, and remains stopped before enrollment.
+- MSI installs a valid non-secret `agent.example.json` under ProgramData.
+- CI performs silent MSI install/uninstall, verifies service account/start policy/command line and confirms cleanup.
+- Added SHA-256 artifact manifest.
+
+### Certification
+- Agent portable `go test -race` + `go vet`: success.
+- Windows Go tests/vet and x64 execution: success; arm64 compile gate: success.
+- Device Edge race/vet/build/non-root image: success.
+- v0.7 clean-stack from empty volumes: success.
+- Real Enrollment-issued certificate and HTTPS mTLS Device Edge flow: success.
+- Header spoofing, heartbeat/ONLINE, telemetry/latest, command lifecycle, result replay and CRL revocation: success.
+- Device Edge TLS CA private key isolation: success.
+- v0.6 regression certification completed two clean-stack cycles with the v0.7 stack changes.
+
+## [0.6.0] - 2026-08-27
+
+### Endpoint Operations Core
+- Added Agent Control heartbeat/capabilities/online-offline state and outbox events.
+- Added typed Command Service with idempotency, leases, acquire/running/result/cancel and replay protection.
+- Added bounded Telemetry Service with allowlisted metrics, batch dedupe and latest reads.
+- Added normalized trusted device principal boundary and protected Gateway admin/device-plane separation.
+- Added v0.6 clean-stack certification including NATS outage recovery, Audit and secret isolation.
+
+## [0.5.0] - 2026-08-26
+
+### Gateway + Audit
+- Added static northbound Gateway allowlist, JWT/JWKS validation, header sanitization, request limits and rate limiting.
+- Administrative mutations are audit-intent fail-closed.
+- Added independent Audit database, durable JetStream ingestion, dedupe, append-only records and verifiable hash chain.
+
 ## [0.4.0] - 2026-08-24
 
 ### Core release
@@ -12,76 +68,18 @@ All notable IT Guardian changes are documented here.
 
 ### Enrollment
 - One-time high-entropy tokens are bound to tenant + asset and persisted only as SHA-256 hash plus a non-secret hint.
-- The plaintext token is returned only at creation and never appears in inventory/events.
 - Atomic reservation creates stable `device_id` + `issuance_id` before the PKI network call.
 - Identical retries reuse the same enrollment/certificate; mismatched token reuse is rejected as replay.
 - CSR validation accepts RSA >=2048 and EC P-256/P-384 while endpoint private keys remain local.
 - Added a dedicated Enrollment Ed25519 signer and public JWKS for short-lived PKI grants.
-- Added safe PKI retry/recovery semantics: transient failure and issuance conflict preserve identity; correctable rejection can release the token only before a certificate exists.
-- Added administrative token and enrollment inventory with Identity/Tenant authorization and Asset validation through APIs only.
-- Added transactional outbox events `enrollment.token.created`, `enrollment.token.revoked`, `device.enrolled` and `device.enrollment.failed`.
-- Added Prometheus metrics, request IDs and secret-safe HTTP logging.
+- Added safe PKI retry/recovery semantics and administrative enrollment inventory.
+- Added transactional outbox events and secret-safe observability.
 
 ### PKI
 - Guardian Root CA RSA-4096 + Device Intermediate RSA-3072 with fail-safe idempotent initialization.
 - Root private key is available only to `pki-ca-init`; runtime API mounts only Intermediate material read-only.
-- Added idempotent device certificate issuance by `issuance_id`, persistent revocation, signed CRL and atomic certificate rotation.
-- Added Enrollment Ed25519 grant verification bound to tenant, asset, device, issuance ID and CSR SHA-256.
-- Added transactional outbox for PKI certificate events and JetStream delivery.
-
-### Security verification
-- Enrollment API is non-root; Enrollment worker does not receive `ENROLLMENT_SIGNING_KEY`.
-- Enrollment API/worker mount no PKI Root or Intermediate material.
-- PKI API/worker do not receive Enrollment private signer material.
-- PKI runtime has no Root private key; PKI outbox worker has no CA material.
-- Device private keys never cross Enrollment or PKI APIs.
-- Clean-stack replay check returns 409 for a different CSR after token consumption.
-- Clean-stack identical retry returns the same device/certificate without duplicate issuance.
-
-### CI certification
-- Identity Service CI: success.
-- Tenant Service CI: success.
-- Asset Service tests, migration, Docker/Compose and core E2E: success.
-- Enrollment tests, migration, Docker non-root, Compose and clean-stack smoke: success.
-- PKI tests, migration, Docker non-root, Compose overlay and clean-stack smoke: success.
-- Enrollment smoke verified `device.enrolled` in JetStream, signer/CA isolation and clean volume teardown.
-- PKI smoke verified issuance -> revocation -> CRL -> JetStream, Root/signer isolation, CA init idempotence and clean volume teardown.
-
-## [0.4.0-dev.1] - 2026-08-24
-
-### PKI Service
-- Added isolated `guardian_pki` database and Alembic migration.
-- Added Guardian Root CA RSA-4096 and Device Intermediate CA RSA-3072 with idempotent fail-safe initialization.
-- Device private keys remain on endpoints; PKI accepts signed CSR requests only.
-- Added RSA >=2048, EC P-256 and EC P-384 CSR support with weak/unsupported key rejection.
-- Added short-lived Enrollment Ed25519 grants bound to tenant, asset, device, issuance ID and CSR SHA-256.
 - Added idempotent device certificate issuance, persistent revocation, signed CRL and atomic certificate rotation.
-- Added Identity + Tenant scoped certificate administration.
-- Added transactional outbox for `pki.certificate.issued`, `pki.certificate.rotated` and `pki.certificate.revoked`.
-- Added Prometheus metrics, request IDs and secret-safe HTTP logging.
-- Added non-root Docker image and Compose services for DB init, CA init, migration, API and outbox worker.
-
-### PKI Security
-- Root private key is mounted only into `pki-ca-init`.
-- Runtime PKI API mounts only the online Intermediate material read-only.
-- PKI outbox worker mounts no CA material.
-- Enrollment signing private key is not available to PKI runtime.
-- Certificate rotation rejects reuse of the previous endpoint key.
-
-### PKI Verification
-- PKI unit/integration suite and compile: success.
-- Alembic `upgrade -> downgrade -> upgrade`: success.
-- Docker build and non-root UID check: success.
-- Base Compose and PKI smoke overlay validation: success.
-- Clean-stack PKI smoke: success.
-- Smoke verified issuance -> revocation -> CRL -> JetStream.
-- Smoke verified Root key and Enrollment signer isolation.
-- Smoke verified CA initialization idempotence and clean volume teardown.
-
-### Enrollment Service
-- Development gate opened after PKI certification.
-- Target flow: `token -> validate tenant/asset -> reserve one-time token -> CSR -> PKI grant -> certificate -> device.enrolled`.
-- Replay policy: identical retries are idempotent; mismatched reuse is rejected.
+- Added Enrollment Ed25519 grant verification bound to tenant, asset, device, issuance ID and CSR SHA-256.
 
 ## [0.3.0-rc.1] - 2026-08-24
 
@@ -93,21 +91,6 @@ All notable IT Guardian changes are documented here.
 - Clean-stack E2E gate covering `Identity -> Tenant -> Site/Department -> Asset`.
 - JetStream E2E assertion for `guardian.asset.created`.
 - Versioned event envelope shared with Tenant (`schema_version`, `type`, `data`).
-- Asset outbox delivery state with `attempts` and `last_error`.
-- Per-poll retry protection so one failed event is attempted at most once per polling cycle.
-- Operational Asset Service documentation for authorization, references, outbox recovery and clean-stack validation.
-
-### Security
-- Asset Service validates Identity Ed25519 JWTs and forwards only the caller bearer token to Tenant authorization endpoints.
-- Asset Service never reads Tenant tables and never receives the Identity private signing key.
-- Invalid, inactive or cross-tenant site/department references are rejected before persistence.
-
-### Verification
-- Identity Service CI: success on the Asset candidate path.
-- Tenant Service CI: success on the Asset candidate path.
-- Asset unit/integration suite, compile and Alembic round-trip: success.
-- Asset Docker image build and Compose validation: success.
-- Clean-stack `core-e2e`: success, including JetStream event delivery and teardown.
 
 ## [0.3.0-dev.1] - 2026-08-23
 
@@ -115,48 +98,25 @@ All notable IT Guardian changes are documented here.
 - Product roadmap focused on end-to-end functional gates.
 - Asset Service canonical domain foundation.
 - Stable `guardian_asset_id`, tenant/site/department references and asset classification.
-- External identity correlation for engines such as Tactical RMM, Wazuh, GLPI and NetBox.
-- Transactional outbox events `asset.created` and `asset.external_identity.linked`.
-- Identity Ed25519/JWKS token verification.
-- Health/readiness, Prometheus metrics and request IDs.
-- Asset database migration, non-root Docker image and Compose integration.
-- Asset CI gates for tests, migration round-trip, Docker build and Compose validation.
+- External identity correlation and transactional outbox events.
+- Identity Ed25519/JWKS token verification, health/readiness, metrics and request IDs.
+- Asset migration, non-root Docker and CI gates.
 
 ## [0.2.0-dev.1] - 2026-08-21
 
 ### Added
 - Tenant Service with tenants, memberships, sites and hierarchical departments.
 - Tenant-scoped authorization backed by Identity Ed25519 JWKS.
-- Suspended-tenant and inactive-membership enforcement.
-- Transactional outbox with NATS JetStream worker and idempotent event IDs.
-- Tenant Prometheus metrics, structured request logs and stable error contracts.
-- Independent `guardian_tenant` database migration and Docker image.
-
-### Tests
-- 25 local Tenant Service tests passing before packaging.
-- Alembic upgrade/downgrade/upgrade round-trip verified locally.
+- Transactional outbox with NATS JetStream worker and independent database migration.
 
 ## [0.1.0-dev.2] - 2026-08-21
 
 ### Security
 - Replaced shared-secret HS256 signing with Ed25519/EdDSA asymmetric JWT signing.
-- Added `kid`, issuer and audience claims to tokens.
-- Added public `/.well-known/jwks.json` so downstream microservices verify tokens without receiving the Identity private signing key.
-- Production rejects the deterministic development Ed25519 seed.
-
-### Tests
-- Added JWKS verification and issuer/audience coverage; full local suite is 22 tests.
+- Added `kid`, issuer and audience claims and public JWKS.
 
 ## [0.1.0-dev.1] - 2026-08-21
 
 ### Added
 - Microservice-first master architecture and Enterprise Stable roadmap.
-- Identity Service with one-time platform bootstrap.
-- Argon2 password hashing and typed JWT access/refresh tokens.
-- Platform-admin RBAC for user management.
-- Disabled-account enforcement on login, refresh and protected APIs.
-- Stable error envelope with request IDs and sanitized validation details.
-- Health/readiness endpoints, Prometheus metrics and structured HTTP logs.
-- Initial Alembic identity migration.
-- Non-root Identity Service Docker image definition.
-- PostgreSQL + Identity Service Compose deployment.
+- Identity Service with one-time platform bootstrap, Argon2, access/refresh tokens, RBAC, health/metrics and non-root Docker.

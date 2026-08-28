@@ -59,6 +59,7 @@ jobs:
       IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
       ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
       GUARDIAN_ENV: production
+      DEVICE_PROXY_SHARED_SECRET: gateway-ci-device-proxy-secret-not-for-production
     steps:
       - uses: actions/checkout@v4
       - name: Validate base plus automatic Gateway override
@@ -77,6 +78,7 @@ jobs:
       ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
       GUARDIAN_ENV: production
       GATEWAY_PORT: 8080
+      DEVICE_PROXY_SHARED_SECRET: gateway-ci-device-proxy-secret-not-for-production
     steps:
       - uses: actions/checkout@v4
       - name: Ensure clean volumes before certification

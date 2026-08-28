@@ -1,0 +1,75 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="IT Guardian Agent"
+           Manufacturer="IT Guardian"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="{7D65F93F-94ED-4F2E-8C27-467B9BF42E4E}"
+           Language="1033"
+           Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer IT Guardian Agent is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="IT Guardian">
+        <Component Id="AgentExecutable" Guid="*" Bitness="always64">
+          <File Id="AgentExe" Source="$(var.AgentExe)" KeyPath="yes" />
+          <ServiceInstall Id="AgentServiceInstall"
+                          Name="ITGuardianAgent"
+                          DisplayName="IT Guardian Agent"
+                          Description="IT Guardian managed endpoint agent"
+                          Type="ownProcess"
+                          Start="auto"
+                          ErrorControl="normal"
+                          Account="NT AUTHORITY\LocalService"
+                          Arguments="run --config &quot;[CommonAppDataFolder]ITGuardian\Agent\agent.json&quot;">
+            <ServiceConfig DelayedAutoStart="yes"
+                           OnInstall="yes"
+                           OnReinstall="yes"
+                           OnUninstall="no" />
+          </ServiceInstall>
+          <ServiceControl Id="AgentServiceControl"
+                          Name="ITGuardianAgent"
+                          Stop="both"
+                          Remove="uninstall"
+                          Wait="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="ITGuardianData" Name="ITGuardian">
+        <Directory Id="AgentData" Name="Agent">
+          <Component Id="AgentDataDirectory" Guid="*" Bitness="always64">
+            <CreateFolder>
+              <util:PermissionEx User="SYSTEM" GenericAll="yes" />
+              <util:PermissionEx User="BUILTIN\Administrators" GenericAll="yes" />
+              <util:PermissionEx User="NT AUTHORITY\LOCAL SERVICE"
+                                 GenericRead="yes"
+                                 GenericWrite="yes"
+                                 Delete="yes"
+                                 ReadPermission="yes" />
+            </CreateFolder>
+            <RegistryValue Root="HKLM"
+                           Key="Software\ITGuardian\Agent"
+                           Name="DataDirectory"
+                           Type="string"
+                           Value="[AgentData]"
+                           KeyPath="yes" />
+          </Component>
+          <Component Id="AgentExampleConfigFile" Guid="*" Bitness="always64">
+            <File Id="AgentExampleConfig"
+                  Source="$(var.AgentExampleConfig)"
+                  Name="agent.example.json"
+                  KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="IT Guardian Agent" Level="1">
+      <ComponentRef Id="AgentExecutable" />
+      <ComponentRef Id="AgentDataDirectory" />
+      <ComponentRef Id="AgentExampleConfigFile" />
+    </Feature>
+  </Package>
+</Wix>

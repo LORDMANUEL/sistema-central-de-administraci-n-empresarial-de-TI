@@ -1,0 +1,304 @@
+name: Windows Agent v0.7 CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "release/**"]
+    paths:
+      - "agents/windows-agent/**"
+      - "services/device-edge-service/**"
+      - "tests/e2e/**"
+      - "compose.yaml"
+      - "compose.override.yaml"
+      - ".env.example"
+      - ".github/workflows/windows-agent-ci.yml"
+  pull_request:
+    paths:
+      - "agents/windows-agent/**"
+      - "services/device-edge-service/**"
+      - "tests/e2e/**"
+      - "compose.yaml"
+      - "compose.override.yaml"
+      - ".env.example"
+      - ".github/workflows/windows-agent-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  agent-portable-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: agents/windows-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+          cache-dependency-path: agents/windows-agent/go.sum
+      - run: go mod verify
+      - run: go test -race ./...
+      - run: go vet ./...
+      - name: Reject insecure TLS and arbitrary shell primitives
+        run: |
+          if grep -RInE 'InsecureSkipVerify[[:space:]]*:[[:space:]]*true' --include='*.go' .; then
+            echo 'InsecureSkipVerify=true is forbidden' >&2
+            exit 1
+          fi
+          if grep -RInE 'os/exec|cmd\.exe|powershell(\.exe)?' --include='*.go' internal/commands; then
+            echo 'arbitrary shell/process execution primitives are forbidden in command executor' >&2
+            exit 1
+          fi
+
+  device-edge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/device-edge-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: false
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go build -trimpath ./cmd/device-edge
+      - name: Reject insecure Device Edge TLS
+        run: |
+          if grep -RInE 'InsecureSkipVerify[[:space:]]*:[[:space:]]*true|ClientAuth[[:space:]]*:[[:space:]]*tls\.NoClientCert' --include='*.go' .; then
+            echo 'insecure Device Edge TLS configuration is forbidden' >&2
+            exit 1
+          fi
+      - name: Build non-root Device Edge image
+        run: docker build -t itguardian-device-edge:ci .
+      - name: Assert final image is non-root
+        run: |
+          user="$(docker image inspect itguardian-device-edge:ci --format '{{.Config.User}}')"
+          test -n "$user"
+          test "$user" != "0"
+          test "$user" != "root"
+
+  windows-build-package:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+          cache-dependency-path: agents/windows-agent/go.sum
+
+      - name: Test and vet Windows build graph
+        working-directory: agents/windows-agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          go mod verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build Windows x64 and arm64 binaries
+        working-directory: agents/windows-agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          go build -trimpath -ldflags '-s -w -X main.version=0.7.0' -o dist/itguardian-agent-amd64.exe ./cmd/itguardian-agent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:GOARCH = 'arm64'
+          go build -trimpath -ldflags '-s -w -X main.version=0.7.0' -o dist/itguardian-agent-arm64.exe ./cmd/itguardian-agent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:GOOS
+          Remove-Item Env:GOARCH
+          if ((Get-Item dist/itguardian-agent-amd64.exe).Length -le 0) { throw 'empty amd64 executable' }
+          if ((Get-Item dist/itguardian-agent-arm64.exe).Length -le 0) { throw 'empty arm64 executable' }
+
+      - name: Source security scan
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tls = Get-ChildItem agents/windows-agent -Recurse -Filter *.go | Select-String -Pattern 'InsecureSkipVerify\s*:\s*true'
+          if ($tls) { $tls | ForEach-Object { Write-Error $_ }; throw 'insecure TLS source detected' }
+          $shell = Get-ChildItem agents/windows-agent/internal/commands -Recurse -Filter *.go | Select-String -Pattern 'os/exec|cmd\.exe|powershell(\.exe)?'
+          if ($shell) { $shell | ForEach-Object { Write-Error $_ }; throw 'arbitrary shell primitive detected' }
+
+      - name: Install pinned WiX v4 CLI and Util extension
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          dotnet tool install --global wix --version 4.0.6
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $wix = "$env:USERPROFILE\.dotnet\tools\wix.exe"
+          & $wix extension add -g WixToolset.Util.wixext/4.0.6
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $wix extension list -g
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build x64 MSI
+        working-directory: agents/windows-agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $wix = "$env:USERPROFILE\.dotnet\tools\wix.exe"
+          & $wix build `
+            -ext WixToolset.Util.wixext/4.0.6 `
+            -arch x64 `
+            -d AgentExe="$PWD\dist\itguardian-agent-amd64.exe" `
+            -d AgentExampleConfig="$PWD\packaging\windows\agent.example.json" `
+            -d ProductVersion=0.7.0 `
+            -o "$PWD\dist\ITGuardian-Agent-0.7.0-x64.msi" `
+            "$PWD\packaging\windows\Product.wxs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Item dist/ITGuardian-Agent-0.7.0-x64.msi).Length -le 0) { throw 'empty MSI' }
+
+      - name: Smoke install and uninstall x64 MSI
+        working-directory: agents/windows-agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $msi = (Resolve-Path 'dist/ITGuardian-Agent-0.7.0-x64.msi').Path
+          $installLog = Join-Path $env:RUNNER_TEMP 'itguardian-msi-install.log'
+          $uninstallLog = Join-Path $env:RUNNER_TEMP 'itguardian-msi-uninstall.log'
+          $installed = $false
+          try {
+            & msiexec.exe /i $msi /qn /norestart /L*v $installLog
+            if ($LASTEXITCODE -ne 0) {
+              Get-Content $installLog -Tail 200 -ErrorAction SilentlyContinue
+              exit $LASTEXITCODE
+            }
+            $installed = $true
+
+            $exe = Join-Path $env:ProgramFiles 'IT Guardian\itguardian-agent.exe'
+            $template = Join-Path $env:ProgramData 'ITGuardian\Agent\agent.example.json'
+            if (-not (Test-Path $exe)) { throw "installed agent executable missing: $exe" }
+            if (-not (Test-Path $template)) { throw "installed configuration template missing: $template" }
+
+            $reportedVersion = (& $exe version).Trim()
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($reportedVersion -ne '0.7.0') { throw "unexpected installed agent version: $reportedVersion" }
+
+            $templateJson = Get-Content $template -Raw | ConvertFrom-Json
+            if (-not $templateJson.device_edge_url -or -not $templateJson.server_ca_path) { throw 'installed configuration template is incomplete' }
+            if ($templateJson.PSObject.Properties.Name -contains 'update_public_key') { throw 'placeholder update key must not ship in default template' }
+
+            $svc = Get-CimInstance Win32_Service -Filter "Name='ITGuardianAgent'"
+            if ($null -eq $svc) { throw 'ITGuardianAgent service was not installed' }
+            if ($svc.StartMode -ne 'Auto') { throw "unexpected service start mode: $($svc.StartMode)" }
+            $delayed = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\ITGuardianAgent' -Name DelayedAutoStart -ErrorAction Stop).DelayedAutoStart
+            if ($delayed -ne 1) { throw "ITGuardianAgent must be delayed-auto; DelayedAutoStart=$delayed" }
+            if ($svc.StartName -notmatch '(?i)LocalService|Local Service') { throw "unexpected service account: $($svc.StartName)" }
+            if ($svc.State -ne 'Stopped') { throw "MSI must not start unenrolled agent; state=$($svc.State)" }
+            if ($svc.PathName -notmatch 'run' -or $svc.PathName -notmatch 'agent\.json') { throw "unexpected service command line: $($svc.PathName)" }
+          }
+          finally {
+            if ($installed) {
+              & msiexec.exe /x $msi /qn /norestart /L*v $uninstallLog
+              if ($LASTEXITCODE -ne 0) {
+                Get-Content $uninstallLog -Tail 200 -ErrorAction SilentlyContinue
+                throw "MSI uninstall failed with exit code $LASTEXITCODE"
+              }
+            }
+          }
+          if (Get-Service ITGuardianAgent -ErrorAction SilentlyContinue) { throw 'service remains after uninstall' }
+          if (Test-Path (Join-Path $env:ProgramFiles 'IT Guardian\itguardian-agent.exe')) { throw 'agent executable remains after uninstall' }
+
+      - name: Produce SHA-256 manifest
+        working-directory: agents/windows-agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(
+            'dist/itguardian-agent-amd64.exe',
+            'dist/itguardian-agent-arm64.exe',
+            'dist/ITGuardian-Agent-0.7.0-x64.msi'
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+          Get-Content dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: itguardian-windows-agent-v0.7.0
+          path: |
+            agents/windows-agent/dist/itguardian-agent-amd64.exe
+            agents/windows-agent/dist/itguardian-agent-arm64.exe
+            agents/windows-agent/dist/ITGuardian-Agent-0.7.0-x64.msi
+            agents/windows-agent/dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  v07-clean-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [agent-portable-tests, device-edge]
+    env:
+      POSTGRES_PASSWORD: ci-password-not-for-production
+      IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+      ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
+      GUARDIAN_ENV: production
+      GATEWAY_PORT: 8080
+      AGENT_CONTROL_PORT: 8007
+      COMMAND_PORT: 8008
+      TELEMETRY_PORT: 8009
+      DEVICE_PROXY_SHARED_SECRET: v07-ci-device-proxy-secret-not-for-production
+      DEVICE_EDGE_BIND_HOST: 127.0.0.1
+      DEVICE_EDGE_PORT: 8443
+      DEVICE_EDGE_TLS_SERVER_NAMES: localhost,device-edge-service
+      DEVICE_EDGE_CRL_REFRESH_SECONDS: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate v0.7 Compose model
+        run: |
+          docker compose config --quiet
+          services="$(docker compose config --services)"
+          for required in device-edge-tls-init device-edge-service agent-control-service command-service telemetry-service; do
+            grep -Fx "$required" <<<"$services"
+          done
+
+      - name: Start v0.7 from empty volumes
+        run: |
+          docker compose down -v --remove-orphans || true
+          docker compose up -d --build
+
+      - name: Certify real mTLS endpoint flow
+        run: python tests/e2e/v07_device_edge_smoke.py
+
+      - name: Prove Device Edge CA private key isolation
+        run: |
+          edge_id="$(docker compose ps -q device-edge-service)"
+          test -n "$edge_id"
+          python - <<'PY'
+          import json, subprocess
+          cid = subprocess.check_output(["docker", "compose", "ps", "-q", "device-edge-service"], text=True).strip()
+          inspected = json.loads(subprocess.check_output(["docker", "inspect", cid], text=True))[0]
+          assert inspected["Config"]["User"] not in {"", "0", "root", "0:0"}, inspected["Config"]["User"]
+          destinations = {m["Destination"] for m in inspected["Mounts"]}
+          assert "/var/lib/guardian/device-edge-ca" not in destinations, destinations
+          assert "/var/lib/guardian/device-edge-tls" in destinations, destinations
+          env = inspected["Config"]["Env"]
+          assert not any("CA_KEY" in item or "server-ca-key" in item for item in env), env
+          PY
+
+      - name: Dump v0.7 stack on failure
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=1500
+
+      - name: Tear down containers and volumes
+        if: always()
+        run: docker compose down -v --remove-orphans
