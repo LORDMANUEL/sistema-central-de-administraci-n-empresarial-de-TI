@@ -114,10 +114,10 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
-          go build -trimpath -ldflags '-s -w -X main.version=0.7.0-dev.1' -o dist/itguardian-agent-amd64.exe ./cmd/itguardian-agent
+          go build -trimpath -ldflags '-s -w -X main.version=0.7.0' -o dist/itguardian-agent-amd64.exe ./cmd/itguardian-agent
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:GOARCH = 'arm64'
-          go build -trimpath -ldflags '-s -w -X main.version=0.7.0-dev.1' -o dist/itguardian-agent-arm64.exe ./cmd/itguardian-agent
+          go build -trimpath -ldflags '-s -w -X main.version=0.7.0' -o dist/itguardian-agent-arm64.exe ./cmd/itguardian-agent
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item Env:GOOS
           Remove-Item Env:GOARCH
@@ -186,7 +186,7 @@ jobs:
 
             $reportedVersion = (& $exe version).Trim()
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            if ($reportedVersion -ne '0.7.0-dev.1') { throw "unexpected installed agent version: $reportedVersion" }
+            if ($reportedVersion -ne '0.7.0') { throw "unexpected installed agent version: $reportedVersion" }
 
             $templateJson = Get-Content $template -Raw | ConvertFrom-Json
             if (-not $templateJson.device_edge_url -or -not $templateJson.server_ca_path) { throw 'installed configuration template is incomplete' }
@@ -231,14 +231,14 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: itguardian-windows-agent-v0.7
+          name: itguardian-windows-agent-v0.7.0
           path: |
             agents/windows-agent/dist/itguardian-agent-amd64.exe
             agents/windows-agent/dist/itguardian-agent-arm64.exe
             agents/windows-agent/dist/ITGuardian-Agent-0.7.0-x64.msi
             agents/windows-agent/dist/SHA256SUMS.txt
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
   v07-clean-stack:
     runs-on: ubuntu-latest

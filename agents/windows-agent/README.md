@@ -1,32 +1,34 @@
-# IT Guardian Windows Agent
+# IT Guardian Windows Agent 0.7.0
 
-The v0.7 Windows Agent is a non-interactive managed endpoint binary. It enrolls once through the administrative Gateway, stores the device private key protected with Windows DPAPI LocalMachine, then communicates only with Device Edge over mTLS.
+Windows Agent Modern es un servicio no interactivo para endpoints administrados. Se enrola una vez por Gateway, genera la private key localmente, la protege con DPAPI LocalMachine y después se comunica con Device Edge únicamente por mTLS.
 
-## Supported v0.7 target
+## Target v0.7
 
-- Windows 10/11 modern x64; arm64 is compile-gated in CI.
-- Windows 7/8/8.1 remain a separate legacy capability matrix and do not define the v0.7 stable gate.
-- No arbitrary remote shell exists. Commands are limited to `inventory.refresh`, `device.reboot` and `service.restart` with local schema validation.
+- Windows 10/11 moderno x64.
+- arm64 compile-gated en CI.
+- Windows 7/8/8.1 pertenece a la matriz Legacy y no comparte el gate moderno.
+- No existe shell remoto arbitrario.
 
-## Files
+## Directorio de datos
 
-Default data directory: `C:\ProgramData\ITGuardian\Agent`.
+`C:\ProgramData\ITGuardian\Agent`
 
-- `agent.json`: non-secret runtime configuration.
-- `device-edge-ca.pem`: public CA that authenticates the Device Edge HTTPS server.
-- `identity.json`: device IDs, certificate/CA chain, session ID and DPAPI-protected private key.
-- `spool\`: bounded crash-safe offline queue.
-- `update-healthy`: health marker used by the signed updater rollback state machine.
+- `agent.example.json`: template válido instalado por MSI.
+- `agent.json`: configuración runtime no-secret.
+- `device-edge-ca.pem`: CA pública del HTTPS de Device Edge.
+- `identity.json`: IDs, certificado/chain, session ID y private key protegida por DPAPI.
+- `spool\`: cola offline acotada.
+- `update-healthy`: health marker del updater.
 
-The one-time enrollment token is accepted only on the `enroll` command line and is never written to `agent.json` or `identity.json`.
+El enrollment token one-time nunca se escribe en `agent.json` ni `identity.json`.
 
-## Enrollment
+## Instalación
 
-1. Install the MSI. The service is registered as `ITGuardianAgent` under `NT AUTHORITY\LocalService`; it is delayed-auto but is not started by the MSI.
-2. Place the Device Edge public server CA at `C:\ProgramData\ITGuardian\Agent\device-edge-ca.pem`.
-3. Create `agent.json` from `agent.example.json` and set the real Device Edge URL.
-4. Create an enrollment token from IT Guardian for the target asset.
-5. From an elevated terminal execute once:
+1. Instale `ITGuardian-Agent-0.7.0-x64.msi`.
+2. Copie la CA pública de Device Edge a `device-edge-ca.pem`.
+3. Copie `agent.example.json` a `agent.json` y cambie `device_edge_url`.
+4. Cree un enrollment token para el activo.
+5. Ejecute:
 
 ```powershell
 & 'C:\Program Files\IT Guardian\itguardian-agent.exe' enroll `
@@ -35,59 +37,84 @@ The one-time enrollment token is accepted only on the `enroll` command line and 
   --state 'C:\ProgramData\ITGuardian\Agent\identity.json'
 ```
 
-The agent generates an ECDSA P-256 private key locally, sends only its CSR, validates the returned certificate chain/SPIFFE identity/serial/fingerprint, protects the private key with DPAPI LocalMachine and persists only protected identity state.
-
-Then start the service:
+6. Inicie el servicio:
 
 ```powershell
 Start-Service ITGuardianAgent
-Get-Service ITGuardianAgent
 ```
+
+El MSI registra `ITGuardianAgent` como LocalService, Auto + delayed-auto, pero lo deja detenido para evitar arrancar un endpoint no enrolado.
 
 ## Runtime
-
-The installed service executes:
-
-```text
-itguardian-agent.exe run --config C:\ProgramData\ITGuardian\Agent\agent.json
-```
-
-Runtime flow:
 
 ```text
 DPAPI identity
   -> mTLS Device Edge
   -> heartbeat/capabilities
   -> CPU/RAM/disk telemetry
-  -> typed command acquire
+  -> acquire typed command
   -> running
-  -> native WinAPI/SCM execution
+  -> WinAPI/SCM execution
   -> idempotent terminal result
-  -> offline spool/retry when required
+  -> offline spool/retry
 ```
 
-The agent performs an initial real endpoint cycle before writing `update-healthy`. A network failure is never treated as successful health.
+Comandos 0.7: `inventory.refresh`, `device.reboot`, `service.restart`.
 
-## Offline behavior
+## Offline
 
-- 64 MiB maximum spool.
-- 10,000 item maximum.
-- Command terminal results have priority over telemetry.
-- Stable IDs prevent payload mutation under retry.
-- Backoff starts at one second, grows exponentially with jitter and is capped at five minutes.
-- A command is not executed again merely because upload of its terminal result failed.
+- 64 MiB máximo.
+- 10,000 items máximo.
+- Resultados terminales tienen prioridad sobre telemetry.
+- IDs estables impiden mutación del payload bajo retry.
+- Backoff exponencial con jitter: 1 s hasta 5 min.
+- Un comando no se reejecuta solo porque falló el upload de su resultado.
 
-## Updates
+## Updates firmados
 
-The updater library verifies an Ed25519-signed canonical manifest, HTTPS URL, expected size and streaming SHA-256 before activation. Downgrades are rejected. Activation keeps the previous binary until the new process writes the health marker; timeout causes atomic rollback.
+Updates están deshabilitados por defecto. Para habilitarlos, `agent.json` debe incluir los cuatro campos:
 
-Update transport/catalog publication is intentionally independent of command execution; no `shell.exec` or unsigned binary install command exists.
+```json
+{
+  "update_manifest_url": "https://updates.example.com/itguardian/manifest.json",
+  "update_public_key": "<BASE64_ED25519_PUBLIC_KEY>",
+  "update_max_bytes": 67108864,
+  "update_health_timeout_seconds": 120
+}
+```
 
-## Build verification
+La clave pública debe ser una Ed25519 válida de 32 bytes codificada en base64. La URL debe ser HTTPS.
 
 ```powershell
-go test ./...
-go build -trimpath -o dist\itguardian-agent.exe .\cmd\itguardian-agent
+& 'C:\Program Files\IT Guardian\itguardian-agent.exe' update `
+  --config 'C:\ProgramData\ITGuardian\Agent\agent.json'
 ```
 
-The GitHub Actions release gate additionally builds arm64, creates the WiX v4 MSI, publishes SHA-256 hashes, scans source for forbidden insecure TLS/arbitrary-shell patterns and runs the v0.7 integration gate before release promotion.
+Flujo:
+
+1. descarga manifest acotado;
+2. verifica firma Ed25519 y SemVer anti-downgrade;
+3. descarga payload acotado;
+4. verifica tamaño y SHA-256 streaming;
+5. publica staged binary atómicamente;
+6. lanza una copia fija del propio agente como helper interno;
+7. helper espera salida del padre, detiene únicamente `ITGuardianAgent`, activa staged y reinicia;
+8. el nuevo proceso debe completar un ciclo real y escribir `update-healthy`;
+9. health válido elimina previous; timeout restaura previous y reinicia.
+
+No se acepta URL/clave arbitraria en `update` y `apply-update` es una operación interna validada contra la ruta fija del helper.
+
+## Verificación
+
+CI v0.7 ejecuta:
+
+- `go test -race ./...` y `go vet ./...`;
+- scans contra `InsecureSkipVerify` y shell remoto en command executor;
+- tests Windows, build x64 y compile arm64;
+- WiX MSI x64;
+- instalación/desinstalación MSI real;
+- verificación LocalService, Auto, delayed-auto y servicio detenido antes de enrollment;
+- hashes SHA-256;
+- clean-stack mTLS del servidor/Device Edge.
+
+La matriz física por edición/hardware Windows 10/11 es validación de campo adicional; no se presenta el runner hospedado como hardware físico probado.

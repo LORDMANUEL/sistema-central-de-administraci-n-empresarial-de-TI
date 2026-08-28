@@ -14,7 +14,7 @@ import (
 	agentservice "github.com/LORDMANUEL/sistema-central-de-administraci-n-empresarial-de-TI/agents/windows-agent/internal/service"
 )
 
-var version = "0.7.0-dev.1"
+var version = "0.7.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -65,27 +65,22 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("load runtime config: %w", err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		nextVersion, err := app.PrepareUpdate(ctx, cfg, version)
+		newVersion, err := app.PrepareUpdate(ctx, cfg, version)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("IT Guardian signed update %s staged; transactional helper launched\n", nextVersion)
+		fmt.Printf("IT Guardian signed update %s staged; helper will activate after this process exits\n", newVersion)
 		return nil
 	case app.CommandApplyUpdate:
-		deadline := time.Unix(command.DeadlineUnix, 0).UTC()
-		maxRuntime := time.Until(deadline) + 2*time.Minute
-		if maxRuntime <= 0 || maxRuntime > 12*time.Minute {
-			return errors.New("apply-update runtime window is outside policy")
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), maxRuntime)
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 		defer cancel()
 		action, err := app.ApplyUpdate(ctx, command)
 		if err != nil {
 			return err
 		}
-		log.Printf("IT Guardian update transaction completed: %s", action)
+		fmt.Printf("IT Guardian update transaction: %s\n", action)
 		return nil
 	default:
 		return errors.New("unsupported command")
