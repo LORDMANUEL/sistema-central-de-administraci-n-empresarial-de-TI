@@ -155,6 +155,7 @@ jobs:
             -ext WixToolset.Util.wixext/4.0.6 `
             -arch x64 `
             -d AgentExe="$PWD\dist\itguardian-agent-amd64.exe" `
+            -d AgentExampleConfig="$PWD\packaging\windows\agent.example.json" `
             -d ProductVersion=0.7.0 `
             -o "$PWD\dist\ITGuardian-Agent-0.7.0-x64.msi" `
             "$PWD\packaging\windows\Product.wxs"
