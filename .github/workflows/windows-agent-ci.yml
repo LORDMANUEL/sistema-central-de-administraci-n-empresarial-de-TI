@@ -6,11 +6,19 @@ on:
     paths:
       - "agents/windows-agent/**"
       - "services/device-edge-service/**"
+      - "tests/e2e/**"
+      - "compose.yaml"
+      - "compose.override.yaml"
+      - ".env.example"
       - ".github/workflows/windows-agent-ci.yml"
   pull_request:
     paths:
       - "agents/windows-agent/**"
       - "services/device-edge-service/**"
+      - "tests/e2e/**"
+      - "compose.yaml"
+      - "compose.override.yaml"
+      - ".env.example"
       - ".github/workflows/windows-agent-ci.yml"
 
 permissions:
@@ -179,3 +187,66 @@ jobs:
             agents/windows-agent/dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
+
+  v07-clean-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [agent-portable-tests, device-edge]
+    env:
+      POSTGRES_PASSWORD: ci-password-not-for-production
+      IDENTITY_SIGNING_KEY: aXQtZ3VhcmRpYW4tY2ktZWQyNTUxOS1zZWVkLXYxISE
+      ENROLLMENT_SIGNING_KEY: aXRndWFyZGlhbi1lbnJvbGwtY2ktc2VlZC12MSEhISE
+      GUARDIAN_ENV: production
+      GATEWAY_PORT: 8080
+      AGENT_CONTROL_PORT: 8007
+      COMMAND_PORT: 8008
+      TELEMETRY_PORT: 8009
+      DEVICE_PROXY_SHARED_SECRET: v07-ci-device-proxy-secret-not-for-production
+      DEVICE_EDGE_BIND_HOST: 127.0.0.1
+      DEVICE_EDGE_PORT: 8443
+      DEVICE_EDGE_TLS_SERVER_NAMES: localhost,device-edge-service
+      DEVICE_EDGE_CRL_REFRESH_SECONDS: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate v0.7 Compose model
+        run: |
+          docker compose config --quiet
+          services="$(docker compose config --services)"
+          for required in device-edge-tls-init device-edge-service agent-control-service command-service telemetry-service; do
+            grep -Fx "$required" <<<"$services"
+          done
+
+      - name: Start v0.7 from empty volumes
+        run: |
+          docker compose down -v --remove-orphans || true
+          docker compose up -d --build
+
+      - name: Certify real mTLS endpoint flow
+        run: python tests/e2e/v07_device_edge_smoke.py
+
+      - name: Prove Device Edge CA private key isolation
+        run: |
+          edge_id="$(docker compose ps -q device-edge-service)"
+          test -n "$edge_id"
+          python - <<'PY'
+          import json, subprocess
+          cid = subprocess.check_output(["docker", "compose", "ps", "-q", "device-edge-service"], text=True).strip()
+          inspected = json.loads(subprocess.check_output(["docker", "inspect", cid], text=True))[0]
+          assert inspected["Config"]["User"] not in {"", "0", "root", "0:0"}, inspected["Config"]["User"]
+          destinations = {m["Destination"] for m in inspected["Mounts"]}
+          assert "/var/lib/guardian/device-edge-ca" not in destinations, destinations
+          assert "/var/lib/guardian/device-edge-tls" in destinations, destinations
+          env = inspected["Config"]["Env"]
+          assert not any("CA_KEY" in item or "server-ca-key" in item for item in env), env
+          PY
+
+      - name: Dump v0.7 stack on failure
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=1500
+
+      - name: Tear down containers and volumes
+        if: always()
+        run: docker compose down -v --remove-orphans
