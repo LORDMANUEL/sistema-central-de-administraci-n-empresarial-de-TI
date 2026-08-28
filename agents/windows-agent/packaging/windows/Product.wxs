@@ -49,15 +49,18 @@
                                  Delete="yes"
                                  ReadPermission="yes" />
             </CreateFolder>
-            <File Id="AgentExampleConfig"
-                  Source="$(var.AgentExampleConfig)"
-                  Name="agent.example.json" />
             <RegistryValue Root="HKLM"
                            Key="Software\ITGuardian\Agent"
                            Name="DataDirectory"
                            Type="string"
                            Value="[AgentData]"
                            KeyPath="yes" />
+          </Component>
+          <Component Id="AgentExampleConfigFile" Guid="*" Bitness="always64">
+            <File Id="AgentExampleConfig"
+                  Source="$(var.AgentExampleConfig)"
+                  Name="agent.example.json"
+                  KeyPath="yes" />
           </Component>
         </Directory>
       </Directory>
@@ -66,6 +69,7 @@
     <Feature Id="MainFeature" Title="IT Guardian Agent" Level="1">
       <ComponentRef Id="AgentExecutable" />
       <ComponentRef Id="AgentDataDirectory" />
+      <ComponentRef Id="AgentExampleConfigFile" />
     </Feature>
   </Package>
 </Wix>
