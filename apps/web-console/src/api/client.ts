@@ -1,4 +1,9 @@
 const API_BASE = '/console/api'
+let csrfToken: string | null = null
+
+export function setCsrfToken(value: string | null | undefined) {
+  csrfToken = value ?? null
+}
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -8,12 +13,10 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
+  const method = (init.method ?? 'GET').toUpperCase()
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-    credentials: 'include',
-  })
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) headers.set('X-Guardian-CSRF', csrfToken)
+  const response = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: 'include' })
   if (response.status === 204) return undefined as T
   const text = await response.text()
   let payload: unknown = null
