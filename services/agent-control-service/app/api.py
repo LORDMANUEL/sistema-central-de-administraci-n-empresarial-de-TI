@@ -1,9 +1,12 @@
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
+from .admin import device_to_admin_dict, list_visible_devices
+from .auth import IdentityPrincipal, current_principal
 from .database import get_db
 from .device_auth import current_device_principal
 from .errors import GuardianError
@@ -15,6 +18,46 @@ from .schemas import HeartbeatInput
 
 router = APIRouter(prefix="/api/v1")
 internal_router = APIRouter(prefix="/internal/v1")
+
+
+@router.get("/devices")
+def list_devices(
+    request: Request,
+    tenant_id: UUID | None = None,
+    state: Literal["online", "offline"] | None = None,
+    limit: int = 100,
+    session: Session = Depends(get_db),
+    principal: IdentityPrincipal = Depends(current_principal),
+):
+    if tenant_id is not None:
+        request.app.state.tenant_access.require_tenant(tenant_id, principal.bearer_token)
+        accessible_tenants = {tenant_id}
+    else:
+        accessible_tenants = request.app.state.tenant_access.accessible_tenant_ids(principal.bearer_token)
+    return [
+        device_to_admin_dict(row)
+        for row in list_visible_devices(
+            session,
+            accessible_tenants,
+            tenant_id=tenant_id,
+            state=state,
+            limit=limit,
+        )
+    ]
+
+
+@router.get("/devices/{device_id}")
+def get_device(
+    device_id: UUID,
+    request: Request,
+    session: Session = Depends(get_db),
+    principal: IdentityPrincipal = Depends(current_principal),
+):
+    device = session.get(DeviceSession, device_id)
+    if device is None:
+        raise GuardianError(404, "agent_control.device_not_found", "Device not found")
+    request.app.state.tenant_access.require_tenant(device.tenant_id, principal.bearer_token)
+    return device_to_admin_dict(device)
 
 
 @router.post("/device/heartbeat")
