@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from .api.resources import router as resources_router
 from .api.session import router as session_router
 from .config import Settings
 from .errors import ConsoleError, console_error_handler
@@ -18,6 +19,7 @@ def create_app(*, settings: Settings | None = None, gateway=None) -> FastAPI:
     app.state.gateway = gateway or GatewayClient(settings)
     app.add_exception_handler(ConsoleError, console_error_handler)
     app.include_router(session_router)
+    app.include_router(resources_router)
 
     @app.get("/health/live")
     def live():

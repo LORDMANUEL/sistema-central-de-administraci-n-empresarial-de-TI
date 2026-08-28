@@ -3,7 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, Response, status
 from pydantic import BaseModel, Field
 
+from ..authenticated import gateway_request
 from ..errors import ConsoleError
+from ..tokens import parse_token_pair
 
 router = APIRouter(prefix="/console/api/session", tags=["session"])
 
@@ -13,43 +15,8 @@ class LoginInput(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
-def _token_pair(data: dict) -> tuple[str, str]:
-    access = data.get("access_token") if isinstance(data, dict) else None
-    refresh = data.get("refresh_token") if isinstance(data, dict) else None
-    if not isinstance(access, str) or not access or not isinstance(refresh, str) or not refresh:
-        raise ConsoleError(502, "console.invalid_token_response", "Identity token response is invalid")
-    return access, refresh
-
-
-def _session(request: Request):
-    session_id = request.cookies.get(request.app.state.settings.session_cookie_name)
-    item = request.app.state.sessions.get(session_id)
-    if item is None:
-        raise ConsoleError(401, "console.session_required", "Authentication required")
-    return session_id, item
-
-
-def _me_with_refresh(request: Request, session_id, item):
-    response = request.app.state.gateway.request(
-        "GET",
-        "/api/v1/users/me",
-        access_token=item.access_token,
-    )
-    if response.status_code == 401:
-        try:
-            access, refresh = _token_pair(request.app.state.gateway.refresh(item.refresh_token))
-        except ConsoleError:
-            request.app.state.sessions.delete(session_id)
-            raise ConsoleError(401, "console.session_expired", "Session expired")
-        request.app.state.sessions.replace_tokens(session_id, access, refresh)
-        response = request.app.state.gateway.request(
-            "GET",
-            "/api/v1/users/me",
-            access_token=access,
-        )
+def _user_from_response(response):
     if response.status_code >= 400:
-        if response.status_code == 401:
-            request.app.state.sessions.delete(session_id)
         raise ConsoleError(response.status_code, "console.me_failed", "Unable to load current user")
     try:
         return response.json()
@@ -59,10 +26,16 @@ def _me_with_refresh(request: Request, session_id, item):
 
 @router.post("/login")
 def login(payload: LoginInput, request: Request, response: Response):
-    access, refresh = _token_pair(request.app.state.gateway.login(payload.email, payload.password))
+    access, refresh = parse_token_pair(request.app.state.gateway.login(payload.email, payload.password))
     session_id = request.app.state.sessions.create(access, refresh)
     try:
-        user = _me_with_refresh(request, session_id, request.app.state.sessions.get(session_id))
+        user = _user_from_response(
+            request.app.state.gateway.request(
+                "GET",
+                "/api/v1/users/me",
+                access_token=access,
+            )
+        )
     except Exception:
         request.app.state.sessions.delete(session_id)
         raise
@@ -80,8 +53,7 @@ def login(payload: LoginInput, request: Request, response: Response):
 
 @router.get("/me")
 def me(request: Request):
-    session_id, item = _session(request)
-    return {"user": _me_with_refresh(request, session_id, item)}
+    return {"user": _user_from_response(gateway_request(request, "GET", "/api/v1/users/me"))}
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
