@@ -11,14 +11,27 @@ import { filterAssets, filterCommands, filterDevices } from '../scope/filters'
 
 export function OverviewPage() {
   const scope = useTenantScope()
-  const devices = useQuery({ queryKey: ['devices'], queryFn: () => api.get<Device[]>('/devices') })
-  const assets = useQuery({ queryKey: ['assets'], queryFn: () => api.get<Asset[]>('/assets') })
-  const commands = useQuery({ queryKey: ['commands', 'overview'], queryFn: () => api.get<Command[]>('/commands?limit=100') })
-  const audit = useQuery({ queryKey: ['audit', 'verify', scope.tenantId], queryFn: () => api.get<AuditVerification>(`/audit/verify${api.query({ tenant_id: scope.tenantId })}`), enabled: Boolean(scope.tenantId), retry: false })
+  const enabled = Boolean(scope.tenantId)
+  const devices = useQuery({
+    queryKey: ['devices', 'overview', scope.tenantId],
+    queryFn: () => api.get<Device[]>(`/devices${api.query({ tenant_id: scope.tenantId })}`),
+    enabled,
+  })
+  const assets = useQuery({
+    queryKey: ['assets', 'overview', scope.tenantId],
+    queryFn: () => api.get<Asset[]>(`/assets${api.query({ tenant_id: scope.tenantId })}`),
+    enabled,
+  })
+  const commands = useQuery({
+    queryKey: ['commands', 'overview', scope.tenantId],
+    queryFn: () => api.get<Command[]>(`/commands${api.query({ tenant_id: scope.tenantId, limit: 100 })}`),
+    enabled,
+  })
+  const audit = useQuery({ queryKey: ['audit', 'verify', scope.tenantId], queryFn: () => api.get<AuditVerification>(`/audit/verify${api.query({ tenant_id: scope.tenantId })}`), enabled, retry: false })
   const scopedAssets = useMemo(() => filterAssets(assets.data ?? [], scope.tenantId, scope.siteId), [assets.data, scope.tenantId, scope.siteId])
   const scopedDevices = useMemo(() => filterDevices(devices.data ?? [], assets.data ?? [], scope.tenantId, scope.siteId), [devices.data, assets.data, scope.tenantId, scope.siteId])
   const scopedCommands = useMemo(() => filterCommands(commands.data ?? [], assets.data ?? [], scope.tenantId, scope.siteId), [commands.data, assets.data, scope.tenantId, scope.siteId])
-  if (devices.isLoading || assets.isLoading || commands.isLoading || scope.loading) return <LoadingState />
+  if (scope.loading || (enabled && (devices.isLoading || assets.isLoading || commands.isLoading))) return <LoadingState />
   const error = devices.error ?? assets.error ?? commands.error
   if (error) return <ErrorState message={(error as Error).message} />
   const summary = summarizeDevices(scopedDevices)
