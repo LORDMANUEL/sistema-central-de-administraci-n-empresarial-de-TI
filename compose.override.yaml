@@ -207,6 +207,20 @@ services:
       - guardian-device-edge-tls:/var/lib/guardian/device-edge-tls:ro
     ports: ["${DEVICE_EDGE_BIND_HOST:-0.0.0.0}:${DEVICE_EDGE_PORT:-8443}:8443"]
 
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD is required}
+    command: ["sh", "-ec", "exec valkey-server --appendonly yes --requirepass \"$$VALKEY_PASSWORD\""]
+    volumes:
+      - guardian-valkey:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$$VALKEY_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
   web-console-service:
     build:
       context: .
@@ -214,12 +228,16 @@ services:
     restart: unless-stopped
     depends_on:
       gateway-service: {condition: service_healthy}
+      valkey: {condition: service_healthy}
     environment:
+      WEB_CONSOLE_ENVIRONMENT: ${GUARDIAN_ENV:-production}
       WEB_CONSOLE_GATEWAY_URL: http://gateway-service:8000
       WEB_CONSOLE_SESSION_COOKIE_NAME: ${WEB_CONSOLE_SESSION_COOKIE_NAME:-itg_session}
+      WEB_CONSOLE_SESSION_REDIS_URL: redis://:${VALKEY_PASSWORD}@valkey:6379/0
       WEB_CONSOLE_SESSION_TTL_SECONDS: ${WEB_CONSOLE_SESSION_TTL_SECONDS:-1800}
       WEB_CONSOLE_MAX_SESSIONS: ${WEB_CONSOLE_MAX_SESSIONS:-5000}
-      WEB_CONSOLE_COOKIE_SECURE: ${WEB_CONSOLE_COOKIE_SECURE:-false}
+      WEB_CONSOLE_COOKIE_SECURE: ${WEB_CONSOLE_COOKIE_SECURE:-true}
+      WEB_CONSOLE_MAX_JSON_BODY_BYTES: ${WEB_CONSOLE_MAX_JSON_BODY_BYTES:-262144}
     ports: ["127.0.0.1:${WEB_CONSOLE_PORT:-8088}:8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
@@ -230,3 +248,4 @@ services:
 volumes:
   guardian-device-edge-ca:
   guardian-device-edge-tls:
+  guardian-valkey:
