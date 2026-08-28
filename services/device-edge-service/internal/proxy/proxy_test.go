@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 )
 
 func guardianCert(t *testing.T) *x509.Certificate {
@@ -124,5 +125,24 @@ func TestHandlerEnforcesBodyLimit(t *testing.T) {
 	h.ServeHTTP(rr, deviceRequest(t, "POST", "/api/v1/device/heartbeat", []byte("12345")))
 	if rr.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status=%d", rr.Code)
+	}
+}
+
+type staleRevocations struct{}
+
+func (staleRevocations) IsRevoked(*big.Int) bool { return false }
+func (staleRevocations) Valid(time.Time) bool    { return false }
+
+func TestHandlerFailsClosedWhenCRLIsNotCurrent(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatal("upstream must not be called") }))
+	defer upstream.Close()
+	h, err := New(Config{AgentControlURL: upstream.URL, CommandURL: upstream.URL, TelemetryURL: upstream.URL, ProxyToken: "secret", MaxBodyBytes: 1024, Revocations: staleRevocations{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, deviceRequest(t, "POST", "/api/v1/device/heartbeat", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
