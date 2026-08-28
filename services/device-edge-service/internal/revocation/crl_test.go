@@ -70,3 +70,20 @@ func TestStoreRejectsCRLWithWrongSignerAndKeepsLastGood(t *testing.T) {
 		t.Fatal("invalid CRL must not replace state")
 	}
 }
+
+func TestStoreIsValidOnlyWhileSignedCRLIsCurrent(t *testing.T) {
+	ca, key := makeCA(t, "device-ca")
+	store := NewStore(ca)
+	if store.Valid(time.Now()) {
+		t.Fatal("store without CRL must not be trusted")
+	}
+	if err := store.LoadDER(makeCRL(t, ca, key, big.NewInt(42))); err != nil {
+		t.Fatal(err)
+	}
+	if !store.Valid(time.Now()) {
+		t.Fatal("fresh signed CRL must be valid")
+	}
+	if store.Valid(store.NextUpdate().Add(time.Second)) {
+		t.Fatal("expired last-good CRL must fail closed")
+	}
+}
