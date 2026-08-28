@@ -49,6 +49,9 @@
                                  Delete="yes"
                                  ReadPermission="yes" />
             </CreateFolder>
+            <File Id="AgentExampleConfig"
+                  Source="$(var.AgentExampleConfig)"
+                  Name="agent.example.json" />
             <RegistryValue Root="HKLM"
                            Key="Software\ITGuardian\Agent"
                            Name="DataDirectory"
