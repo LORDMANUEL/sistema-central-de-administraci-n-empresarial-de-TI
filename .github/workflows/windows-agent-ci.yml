@@ -89,19 +89,28 @@ jobs:
       - name: Test and vet Windows build graph
         working-directory: agents/windows-agent
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           go mod verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go vet ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Windows x64 and arm64 binaries
         working-directory: agents/windows-agent
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory -Force dist | Out-Null
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
           go build -trimpath -ldflags '-s -w -X main.version=0.7.0-dev.1' -o dist/itguardian-agent-amd64.exe ./cmd/itguardian-agent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:GOARCH = 'arm64'
           go build -trimpath -ldflags '-s -w -X main.version=0.7.0-dev.1' -o dist/itguardian-agent-arm64.exe ./cmd/itguardian-agent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item Env:GOOS
           Remove-Item Env:GOARCH
           if ((Get-Item dist/itguardian-agent-amd64.exe).Length -le 0) { throw 'empty amd64 executable' }
@@ -109,6 +118,7 @@ jobs:
 
       - name: Source security scan
         run: |
+          $ErrorActionPreference = 'Stop'
           $tls = Get-ChildItem agents/windows-agent -Recurse -Filter *.go | Select-String -Pattern 'InsecureSkipVerify\s*:\s*true'
           if ($tls) { $tls | ForEach-Object { Write-Error $_ }; throw 'insecure TLS source detected' }
           $shell = Get-ChildItem agents/windows-agent/internal/commands -Recurse -Filter *.go | Select-String -Pattern 'os/exec|cmd\.exe|powershell(\.exe)?'
@@ -116,25 +126,37 @@ jobs:
 
       - name: Install pinned WiX v4 CLI and Util extension
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           dotnet tool install --global wix --version 4.0.6
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add WixToolset.Util.wixext/4.0.6
+          $wix = "$env:USERPROFILE\.dotnet\tools\wix.exe"
+          & $wix extension add -g WixToolset.Util.wixext/4.0.6
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $wix extension list -g
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build x64 MSI
         working-directory: agents/windows-agent
         run: |
-          & "$env:USERPROFILE\.dotnet\tools\wix.exe" build `
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $wix = "$env:USERPROFILE\.dotnet\tools\wix.exe"
+          & $wix build `
             -ext WixToolset.Util.wixext/4.0.6 `
             -arch x64 `
             -d AgentExe="$PWD\dist\itguardian-agent-amd64.exe" `
             -d ProductVersion=0.7.0 `
             -o "$PWD\dist\ITGuardian-Agent-0.7.0-x64.msi" `
             "$PWD\packaging\windows\Product.wxs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ((Get-Item dist/ITGuardian-Agent-0.7.0-x64.msi).Length -le 0) { throw 'empty MSI' }
 
       - name: Produce SHA-256 manifest
         working-directory: agents/windows-agent
         run: |
+          $ErrorActionPreference = 'Stop'
           $files = @(
             'dist/itguardian-agent-amd64.exe',
             'dist/itguardian-agent-arm64.exe',
