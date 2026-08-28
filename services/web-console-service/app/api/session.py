@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, Response, status
 from pydantic import BaseModel, Field
 
-from ..authenticated import gateway_request
+from ..authenticated import current_session, gateway_request, require_csrf
 from ..errors import ConsoleError
 from ..tokens import parse_token_pair
 
@@ -34,9 +34,10 @@ def _establish_session(email: str, password: str, request: Request, response: Re
     access, refresh = parse_token_pair(request.app.state.gateway.login(email, password))
     session_id = request.app.state.sessions.create(access, refresh)
     try:
-        user = _user_from_response(
-            request.app.state.gateway.request("GET", "/api/v1/users/me", access_token=access)
-        )
+        user = _user_from_response(request.app.state.gateway.request("GET", "/api/v1/users/me", access_token=access))
+        item = request.app.state.sessions.get(session_id)
+        if item is None:
+            raise ConsoleError(503, "console.session_store_unavailable", "Session could not be established")
     except Exception:
         request.app.state.sessions.delete(session_id)
         raise
@@ -49,7 +50,7 @@ def _establish_session(email: str, password: str, request: Request, response: Re
         path="/console",
         max_age=request.app.state.settings.session_ttl_seconds,
     )
-    return {"user": user}
+    return {"user": user, "csrf_token": item.csrf_token}
 
 
 @router.post("/bootstrap", status_code=status.HTTP_201_CREATED)
@@ -65,12 +66,13 @@ def login(payload: LoginInput, request: Request, response: Response):
 
 @router.get("/me")
 def me(request: Request):
-    return {"user": _user_from_response(gateway_request(request, "GET", "/api/v1/users/me"))}
+    _, item = current_session(request)
+    return {"user": _user_from_response(gateway_request(request, "GET", "/api/v1/users/me")), "csrf_token": item.csrf_token}
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(request: Request, response: Response):
-    session_id = request.cookies.get(request.app.state.settings.session_cookie_name)
+    session_id, _ = require_csrf(request)
     request.app.state.sessions.delete(session_id)
     response.delete_cookie(
         request.app.state.settings.session_cookie_name,
