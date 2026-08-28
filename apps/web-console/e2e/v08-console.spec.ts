@@ -53,16 +53,17 @@ test('certifies secure scoped endpoint workflow through the real Web Console', a
   await expect(siteSelect).toHaveValue(data.site_id)
 
   await page.getByRole('link', { name: 'Dispositivos' }).click()
-  await expect(page.getByRole('table')).toBeVisible()
-  await expect(page.getByText('ONLINE')).toBeVisible()
-  await page.locator('a.primary-link').first().click()
+  const deviceTable = page.getByRole('table')
+  await expect(deviceTable).toBeVisible()
+  await expect(deviceTable.getByText('ONLINE', { exact: true })).toBeVisible()
+  await deviceTable.locator('a.primary-link').first().click()
   await expect(page.getByRole('heading', { name: 'Windows endpoint' })).toBeVisible()
   await expect(page.getByText('17.5%')).toBeVisible()
   await expect(page.getByText(/3 GB \/ 8 GB|3\.0 GB \/ 8\.0 GB/i)).toBeVisible()
 
   await page.getByRole('button', { name: 'Ejecutar comando' }).click()
   await expect(page.getByText(/Comando creado:/)).toBeVisible()
-  await expect(page.getByText('SUCCEEDED')).toBeVisible({ timeout: 70_000 })
+  await expect(page.getByText('SUCCEEDED', { exact: true })).toBeVisible({ timeout: 70_000 })
 
   await page.getByRole('link', { name: 'Auditoría' }).click()
   await expect(page.getByText(/Integridad de cadena/)).toBeVisible()
