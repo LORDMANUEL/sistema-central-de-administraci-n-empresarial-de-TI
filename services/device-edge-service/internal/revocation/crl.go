@@ -30,7 +30,11 @@ func (s *Store) LoadDER(der []byte) error {
 	if err := crl.CheckSignatureFrom(s.issuer); err != nil {
 		return err
 	}
-	if !crl.NextUpdate.IsZero() && time.Now().After(crl.NextUpdate) {
+	now := time.Now()
+	if !crl.ThisUpdate.IsZero() && now.Before(crl.ThisUpdate.Add(-2*time.Minute)) {
+		return errors.New("revocation list is not yet valid")
+	}
+	if crl.NextUpdate.IsZero() || now.After(crl.NextUpdate) {
 		return errors.New("revocation list is expired")
 	}
 	next := make(map[string]struct{}, len(crl.RevokedCertificateEntries))
@@ -63,4 +67,14 @@ func (s *Store) NextUpdate() time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.next
+}
+
+func (s *Store) Valid(now time.Time) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	next := s.next
+	s.mu.RUnlock()
+	return !next.IsZero() && now.Before(next)
 }
