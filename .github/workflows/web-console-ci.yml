@@ -55,7 +55,7 @@ jobs:
         run: python -m pytest -q
       - name: Prove device plane is not northbound
         run: |
-          if grep -nE 'policy\([^\n]*"(POST|GET)"[^\n]*"/api/v1/device/' services/gateway-service/app/routes.py; then
+          if grep -R -nE '"/api/v1/device/' services/gateway-service/app/routes.py services/gateway-service/app/v06_routes.py services/gateway-service/app/v08_routes.py; then
             echo 'Device-plane route leaked into Gateway northbound registry' >&2
             exit 1
           fi
@@ -81,6 +81,10 @@ jobs:
         run: |
           if grep -R -nE '(/api/v1/device/|X-Guardian-Proxy-Token|X-Guardian-Device-ID)' services/web-console-service/app; then
             echo 'Device-plane primitive found in Web Console BFF' >&2
+            exit 1
+          fi
+          if grep -R -nE '(localStorage|sessionStorage|indexedDB)' services/web-console-service/app; then
+            echo 'Browser persistence primitive found in BFF' >&2
             exit 1
           fi
 
@@ -117,6 +121,8 @@ jobs:
       IDENTITY_SIGNING_KEY: ci-identity-seed
       ENROLLMENT_SIGNING_KEY: ci-enrollment-seed
       DEVICE_PROXY_SHARED_SECRET: ci-device-proxy-secret-long-value
+      VALKEY_PASSWORD: ci-valkey-secret-long-value
+      WEB_CONSOLE_COOKIE_SECURE: 'false'
     steps:
       - uses: actions/checkout@v4
       - name: Validate effective Compose model
@@ -126,6 +132,12 @@ jobs:
       - name: Assert non-root image
         run: |
           test "$(docker image inspect it-guardian-web-console:v08-ci --format '{{.Config.User}}')" = guardian
+      - name: Assert Valkey is internal only
+        run: |
+          if docker compose config | awk '/^  valkey:/{flag=1; next} /^  [a-zA-Z0-9_-]+:/{flag=0} flag' | grep -q '^    ports:'; then
+            echo 'Valkey must not publish host ports' >&2
+            exit 1
+          fi
       - name: Smoke static runtime
         run: |
           cid=$(docker run -d -p 127.0.0.1:18088:8000 it-guardian-web-console:v08-ci)
