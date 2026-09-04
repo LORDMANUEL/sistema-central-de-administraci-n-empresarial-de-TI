@@ -4,10 +4,12 @@ from fastapi import FastAPI, Request, Response
 from sqlalchemy import text
 
 from .api import internal_router, router
+from .auth import AccessTokenVerifier
 from .config import Settings, get_settings
 from .database import Base, build_engine, build_session_factory
 from .errors import GuardianError, guardian_error_handler
 from .metrics import HTTP_REQUESTS, render_metrics
+from .tenant_access import TenantAccess
 
 
 def create_app(*, database_url: str | None = None) -> FastAPI:
@@ -15,10 +17,12 @@ def create_app(*, database_url: str | None = None) -> FastAPI:
     engine = build_engine(settings.database_url)
     if settings.database_url.startswith("sqlite"):
         Base.metadata.create_all(engine)
-    app = FastAPI(title="IT Guardian Agent Control", version="0.6.0-dev.1")
+    app = FastAPI(title="IT Guardian Agent Control", version="0.8.0-dev.1")
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = build_session_factory(engine)
+    app.state.auth = AccessTokenVerifier(settings)
+    app.state.tenant_access = TenantAccess(settings)
     app.state.device_principal_resolver = None
     app.add_exception_handler(GuardianError, guardian_error_handler)
     app.include_router(router)

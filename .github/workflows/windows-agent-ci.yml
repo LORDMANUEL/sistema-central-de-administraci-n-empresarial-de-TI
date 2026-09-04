@@ -24,6 +24,10 @@ on:
 permissions:
   contents: read
 
+env:
+  VALKEY_PASSWORD: ci-valkey-secret-long-value
+  WEB_CONSOLE_COOKIE_SECURE: 'false'
+
 jobs:
   agent-portable-tests:
     runs-on: ubuntu-latest

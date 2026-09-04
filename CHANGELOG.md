@@ -2,6 +2,39 @@
 
 All notable IT Guardian changes are documented here.
 
+## [0.8.0] - 2026-08-28
+
+### Web Console
+- Added React/TypeScript administrative console with Overview, Organization, Assets, Devices, Device Detail, Commands, Enrollment, Audit and Users.
+- Added in-memory tenant/site scope and server-side tenant-scoped operational requests.
+- Added UI RBAC for navigation and direct URLs, plus loading/empty/error states.
+- Commands remain typed/allowlisted; Web Console does not expose arbitrary shell execution.
+
+### BFF security
+- Added FastAPI Web Console BFF as the browser's only API surface.
+- Identity access/refresh tokens remain server-side; the browser receives only an opaque HttpOnly session cookie.
+- Added production Valkey/Redis session storage, CSRF protection, CSP, frame denial, nosniff, no-referrer, Permissions-Policy and no-store API responses.
+- Added fixed administrative proxy allowlist; device-plane routes cannot be reached through Web Console/Gateway.
+- Added CI scans proving no token persistence in localStorage/sessionStorage.
+
+### Packaging and integration
+- Added multi-stage React/Python Web Console image with non-root runtime.
+- Added internal Valkey service without host port publication.
+- Added Web Console service on configurable host port 8088.
+- Added scope-aware Assets, Devices, Commands and Enrollment requests using required tenant assertions.
+
+### Certification
+- Frontend unit tests, TypeScript and Vite production build: success.
+- BFF tests/compile/boundary checks: success.
+- Gateway admin/device-plane boundary tests: success.
+- Agent Control admin tests: success.
+- Web Console non-root image, Compose validation, internal Valkey and static runtime smoke: success.
+- Clean-stack from empty volumes: success.
+- Real tenant/site/asset/enrollment and device certificate: success.
+- Real Device Edge mTLS heartbeat and telemetry: success.
+- Chromium login, tenant/site scope, endpoint ONLINE, telemetry, command creation, mTLS agent acquire/result `SUCCEEDED`, Audit and logout: success.
+- Runtime isolation checks: success.
+
 ## [0.7.0] - 2026-08-28
 
 ### Device Edge

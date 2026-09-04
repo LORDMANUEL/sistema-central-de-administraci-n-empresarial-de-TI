@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     enrollment_service_url: str = "http://enrollment-service:8000"
     pki_service_url: str = "http://pki-service:8000"
     audit_service_url: str = "http://audit-service:8000"
+    agent_control_service_url: str = "http://agent-control-service:8000"
     command_service_url: str = "http://command-service:8000"
     telemetry_service_url: str = "http://telemetry-service:8000"
 

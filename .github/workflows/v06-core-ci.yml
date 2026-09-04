@@ -36,6 +36,8 @@ jobs:
       COMMAND_PORT: 8008
       TELEMETRY_PORT: 8009
       DEVICE_PROXY_SHARED_SECRET: v06-ci-device-proxy-secret-not-for-production
+      VALKEY_PASSWORD: ci-valkey-secret-long-value
+      WEB_CONSOLE_COOKIE_SECURE: 'false'
     steps:
       - uses: actions/checkout@v4
 
