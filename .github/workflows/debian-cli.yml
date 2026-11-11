@@ -1,0 +1,33 @@
+name: Debian CLI P0 package
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packaging/debian/**'
+      - 'tests/test_debian_cli.py'
+      - '.github/workflows/debian-cli.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  debian:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static Python validation
+        run: |
+          python3 -m py_compile packaging/debian/build.py packaging/debian/it_guardian_cli.py
+          python3 -m unittest discover -s tests -p test_debian_cli.py -v
+      - name: Build Debian package
+        run: python3 packaging/debian/build.py --output-dir artifacts
+      - name: Validate package contents and metadata
+        run: |
+          test -s artifacts/it-guardian_0.8.1_all.deb
+          dpkg-deb --info artifacts/it-guardian_0.8.1_all.deb
+          dpkg-deb --contents artifacts/it-guardian_0.8.1_all.deb | grep -E 'usr/bin/it-guardian|usr/share/it-guardian/source.tar.gz'
+          sha256sum artifacts/*.deb | tee artifacts/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: it-guardian-debian-p0
+          path: artifacts/
+          if-no-files-found: error
