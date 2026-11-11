@@ -332,4 +332,5 @@ El Core MVP visual ya está cerrado; el producto completo sigue avanzando por m�
 Windows 7/8/8.1, macOS Lion–10.12, KaiOS, Symbian y adaptadores Huawei específicos usan una matriz de capacidades separada. No se afirma paridad donde la plataforma no la permite.
 
 Consulte `ROADMAP.md` para el estado canónico y `MASTER.md` para la arquitectura completa.
-\n</details>\n
+
+</details>
