@@ -67,6 +67,9 @@ def install():
         raise RuntimeError("Create /etc/it-guardian/guardian.env with production secrets; no default credentials are allowed")
     if ENV.stat().st_mode & 0o077:
         raise RuntimeError("guardian.env must be private (chmod 600)")
+    env_text = ENV.read_text(encoding="utf-8")
+    if "replace-with-" in env_text or "ci-password" in env_text:
+        raise RuntimeError("Refusing example/CI credentials in guardian.env")
     if not shutil.which("docker"):
         raise RuntimeError("Docker Engine and Compose v2 required; no global Docker changes made")
     execute(["docker", "compose", "version"], capture=True)
