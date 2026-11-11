@@ -2,6 +2,62 @@
 
 Regla de entrega: **cada versión agrega una capacidad utilizable de punta a punta**. Ningún servicio se marca DONE solo por tener código o unit tests.
 
+## Mapa visual del producto y ruta de entrega
+
+```mermaid
+flowchart TB
+    CORE["CORE v0.1–0.8 · Identidad, inventario, PKI, telemetría, agente y consola"] --> P0A["P0-A · v0.8.1 · CLI Debian + responsive + controles"]
+    P0A --> P0B["P0-B · v0.8.2 · instalador asistido + restore + hardening"]
+    P0B --> RMM["v0.9 · Software + Patch + Policy"]
+    RMM --> HELP["v0.10 · Tickets y cliente TI"]
+    HELP --> REM["v0.11 · Soporte remoto propio"]
+    REM --> SEC["v0.12 · Endpoint security"]
+    SEC --> AG["v0.13–0.14 · Linux/macOS + servidores/impresoras"]
+    AG --> REST["v0.15–0.19 · Backups, redes, MDM, DFIR, automatización"]
+    REST --> RC["v0.20-rc · Gate integral"]
+    RC --> STABLE["v1.0 · Enterprise Stable"]
+    classDef done fill:#dcf7ea,stroke:#157f59,color:#13583c
+    classDef active fill:#fff2d2,stroke:#b57a12,color:#5d440d
+    classDef todo fill:#e7f0fd,stroke:#4e7db8,color:#1e466b
+    class CORE done
+    class P0A,P0B active
+    class RMM,HELP,REM,SEC,AG,REST,RC,STABLE todo
+```
+
+**Leyenda:** verde = marcado como DONE en el roadmap histórico; ámbar = en implementación/revisión, no aprobado; azul = pendiente. No se presenta un porcentaje de progreso porque cada etapa tiene complejidad diferente.
+
+### Dependencias y evidencias críticas
+
+```mermaid
+flowchart LR
+    SRC["Código + versiones fijadas"] --> CI["Build + pruebas en CI"]
+    CI --> DEB["Paquete Debian + hash"]
+    DEB --> VM["Instalación limpia VM"]
+    VM --> TLS["HTTPS / secretos / aislamiento"]
+    TLS --> AGENT["MSI Windows físico + mTLS"]
+    AGENT --> BACKUP["Restauración PostgreSQL"]
+    BACKUP --> REVIEW{"Gate de seguridad / revisión"}
+    REVIEW -->|"Aprobado"| RELEASE["Release candidato"]
+    REVIEW -->|"Falla"| FIX["Corregir y volver a probar"]
+    FIX --> CI
+    classDef critical fill:#fff2dc,stroke:#c18a34,color:#63400c
+    class REVIEW critical
+```
+
+### Matriz de estado verificable
+
+| Área | Código/documentación | Verificación independiente aún requerida |
+|---|---|---|
+| Core v0.8 | Documentado como completado en `main` | Revalidar suites en SHA actual |
+| P0 Debian CLI | Código en PR Draft | Empaquetado CI, instalación limpia, upgrade y rollback |
+| Web responsive | Estilos en PR Draft | Breakpoints, accesibilidad, screenshots y E2E |
+| Seguridad | Baseline de controles redactado | MFA, pruebas de vulnerabilidades, evidencia y auditoría externa |
+| Software/patch/policy | Roadmap | Runtime nativo y pruebas |
+| Soporte remoto | Roadmap | Implementación propia con consentimiento y auditoría |
+| Enterprise v1.0 | Objetivo | Todos los gates anteriores cerrados |
+
+[Entrega P0 detallada](docs/P0_DELIVERY_ROADMAP_2026.md) · [Matriz SOC 2 / ISO 27001](docs/security/SOC2_ISO27001_CONTROL_BASELINE.md) · [Volver al README](README.md)
+
 ## Camino crítico Core MVP
 
 `Identity -> Tenant -> Asset -> Enrollment/PKI -> Gateway/Audit -> Agent Control/Command/Telemetry -> Device Edge/Windows Agent -> Web Console`
